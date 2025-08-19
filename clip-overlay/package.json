@@ -1,0 +1,12 @@
+{
+  "name": "clip-overlay",
+  "version": "0.1.0",
+  "main": "main.js",
+  "type": "commonjs",
+  "scripts": {
+    "start": "electron ."
+  },
+  "dependencies": {
+    "electron-store": "^8.2.0"
+  }
+}
