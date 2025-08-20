@@ -2,13 +2,11 @@ const {
   app,
   BrowserWindow,
   globalShortcut,
-  Menu,
   clipboard,
   ipcMain,
-  nativeImage,
 } = require('electron');
 const path = require('path');
-const Store = require('electron-store'); // v8 CJS is fine
+const Store = require('electron-store'); // v8 CJS
 
 // ---------------- Stores ----------------
 const settingsStore = new Store({
@@ -16,7 +14,7 @@ const settingsStore = new Store({
   defaults: {
     hotkey: 'CommandOrControl+Shift+Space',
     maxItems: 500,
-    captureContext: false, // optional, usually off
+    captureContext: false,
     theme: 'light',
   },
 });
@@ -38,8 +36,7 @@ async function maybeLoadActiveWin() {
   try {
     const mod = await import('active-win');
     activeWinGetter = mod.default;
-  } catch (e) {
-    console.warn('active-win unavailable; disabling captureContext:', e?.message);
+  } catch {
     settingsStore.set('captureContext', false);
   }
   return activeWinGetter;
@@ -63,12 +60,18 @@ function createOverlay() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
+      backgroundThrottling: false, // keep UI responsive
     },
   });
 
   overlayWin.on('closed', () => { overlayWin = null; });
-  overlayWin.loadFile('overlay.html');
+  overlayWin.on('blur', () => { // close-on-blur
+    if (!overlayWin) return;
+    overlayWin.webContents.send('overlay:anim', false);
+    overlayWin.hide();
+  });
 
+  overlayWin.loadFile('overlay.html');
   return overlayWin;
 }
 
@@ -108,7 +111,8 @@ function startClipboardPolling() {
     if (text === lastClipboardText) return;
     lastClipboardText = text;
 
-    let source = null;
+    // context (optional)
+    let source = undefined;
     if (settingsStore.get('captureContext')) {
       try {
         const getWin = await maybeLoadActiveWin();
@@ -143,7 +147,6 @@ function startClipboardPolling() {
     if (items.length > max) items.length = max;
 
     historyStore.set('items', items);
-
     if (overlayWin && overlayWin.isVisible()) {
       overlayWin.webContents.send('history:update', items);
     }
@@ -174,11 +177,10 @@ ipcMain.handle('history:updateItem', (_e, { id, patch }) => {
   return true;
 });
 ipcMain.handle('delete-history-item', (_e, id) => {
-  const items = historyStore.get('items') || [];
-  const filtered = items.filter(i => i.id !== id);
-  historyStore.set('items', filtered);
+  const items = (historyStore.get('items') || []).filter(i => i.id !== id);
+  historyStore.set('items', items);
   if (overlayWin && overlayWin.isVisible()) {
-    overlayWin.webContents.send('history:update', filtered);
+    overlayWin.webContents.send('history:update', items);
   }
   return true;
 });
@@ -205,13 +207,24 @@ ipcMain.handle('clipboard:set', (_e, data) => {
   return true;
 });
 
-// ---------------- App lifecycle ----------------
-app.whenReady().then(() => {
-  createOverlay();
-  registerHotkey();
-  startClipboardPolling();
-});
+// ---------------- Single instance & lifecycle ----------------
+app.setAppUserModelId('clip-overlay'); // good practice on Windows
 
-app.on('will-quit', () => {
-  globalShortcut.unregisterAll();
-});
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    showOverlay();
+  });
+
+  app.whenReady().then(() => {
+    createOverlay();
+    registerHotkey();
+    startClipboardPolling();
+  });
+
+  app.on('will-quit', () => {
+    globalShortcut.unregisterAll();
+  });
+}
