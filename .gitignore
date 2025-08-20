@@ -1,1 +1,17 @@
-#gitignore
+# Node / Electron
+node_modules/
+out/
+dist/
+.DS_Store
+
+# Electron caches
+*.asar
+cache/
+inputs/
+Code\ Cache/
+GPUCache/
+
+# OS/editor cruft
+Thumbs.db
+.vscode/
+.idea/
