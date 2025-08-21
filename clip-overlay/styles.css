@@ -239,13 +239,43 @@ html, body { background: transparent !important; }
   z-index: 10;
 }
 
-body
-{
-  /* padding: 8px; */
-}
-
 /* (If you still have #backdrop from older CSS, neutralize it just in case) */
 #backdrop { display: none !important; background: transparent !important; }
 
 
 .overlay { box-shadow: 0 6px 24px rgba(0,0,0,0.22) !important; }
+
+/* Image row layout */
+.row.image {
+  display: grid;
+  grid-template-columns: 120px 1fr;
+  align-items: center;
+  gap: 12px;
+}
+.thumbwrap {
+  padding: 6px;
+  border-radius: 10px;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid rgba(255,255,255,0.06);
+}
+.thumb {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: 6px;
+}
+
+/* Make page fully transparent; only card has background */
+html, body { background: transparent !important; }
+/* No backdrop layer anywhere */
+#backdrop { display: none !important; background: transparent !important; }
+
+/* Wider, responsive card */
+.overlay { width: clamp(900px, 82vw, 1280px); box-shadow: 0 6px 24px rgba(0,0,0,0.22) !important; }
+
+/* Softer header divider & ghost action buttons (from earlier polish) */
+.toolbar { border-bottom: 1px solid rgba(255,255,255,0.06); }
+.pin-btn, .del-btn { border: none; background: transparent; padding: 2px 6px; border-radius: 8px; opacity: .8; }
+.pin-btn:hover, .del-btn:hover { background: rgba(255,255,255,0.10); opacity: 1; }
+/* Highlight */
+.primary mark { background: rgba(90,160,255,0.28); padding: 0 2px; border-radius: 4px; }
