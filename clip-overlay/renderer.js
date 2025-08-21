@@ -1,6 +1,9 @@
+// renderer.js
+
+/* ---------- DOM helpers ---------- */
 const $ = (sel) => document.querySelector(sel);
 
-/* DOM refs */
+/* Core elements */
 const resultsEl   = $('#results');
 const searchEl    = $('#search');
 const settingsEl  = $('#settings');
@@ -13,17 +16,22 @@ const saveBtn     = $('#saveSettings');
 const closeBtn    = $('#closeSettings');
 const overlayCard = document.querySelector('.overlay');
 
-/* New settings refs */
+/* Tabs */
+const tabsEl = $('#tabs');
+
+/* Settings (search/fuzzy) */
 const searchModeEl   = $('#searchMode');
 const fuzzyThreshEl  = $('#fuzzyThreshold');
 const fuzzyThreshVal = $('#fuzzyThresholdValue');
 
+/* ---------- State ---------- */
 let items = [];
 let filtered = [];
 let selectedIndex = 0;
 let cfg = { searchMode: 'fuzzy', fuzzyThreshold: 0.5 };
+let currentTab = localStorage.getItem('clip_tab') || 'recent';
 
-/* Utils */
+/* ---------- Utils ---------- */
 function escapeHTML(s='') {
   return String(s).replace(/[&<>"']/g,(m)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
 }
@@ -39,7 +47,9 @@ function highlightPrimary(text, matches) {
   let html = ''; let last = 0; const maxLen = oneLine.length;
   (m.indices || []).forEach(([start,end]) => {
     if (start >= maxLen) return;
-    const s = Math.max(0, start); const e = Math.min(maxLen - 1, end); if (e < 0) return;
+    const s = Math.max(0, start);
+    const e = Math.min(maxLen - 1, end);
+    if (e < 0) return;
     html += escapeHTML(oneLine.slice(last, s));
     html += `<mark>${escapeHTML(oneLine.slice(s, e + 1))}</mark>`;
     last = e + 1;
@@ -48,13 +58,26 @@ function highlightPrimary(text, matches) {
   return html;
 }
 
-/* Render */
+/* ---------- URL helpers ---------- */
+const URL_RE = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;              // detect
+const URL_EXTRACT_RE = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;      // extract first
+function extractUrlFromText(text = "") {
+  const m = String(text).match(URL_EXTRACT_RE);
+  if (!m) return null;
+  let url = m[0];
+  // strip common trailing punctuation/brackets
+  url = url.replace(/[)\]\}>,.;!?]+$/g, '');
+  return url;
+}
+const isUrlItem = (it) => it.type === 'text' && URL_RE.test(String(it.text || ''));
+
+/* ---------- Rendering ---------- */
 function render(list) {
   resultsEl.innerHTML = '';
   if (!list.length) {
     const li = document.createElement('li');
     li.className = 'row';
-    li.innerHTML = `<div class="primary">No matching items</div><div class="meta">Try a different query or clear search.</div>`;
+    li.innerHTML = `<div class="primary">No items</div><div class="meta">Try another tab or clear search.</div>`;
     resultsEl.appendChild(li);
     return;
   }
@@ -64,6 +87,7 @@ function render(list) {
     li.className = 'row' + (idx === selectedIndex ? ' selected' : '');
 
     if (it.type === 'image') {
+      // Image row
       li.classList.add('image');
       const dims = it.wh ? ` ${it.wh.w}×${it.wh.h}` : '';
       const ctx = it.source ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}` : '';
@@ -81,13 +105,18 @@ function render(list) {
         </div>
       `;
     } else {
+      // Text row (with URL open button when applicable)
       const ctx = it.source ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}` : '';
       const primaryHTML = it._matches ? highlightPrimary(it.text, it._matches) : escapeHTML(trimOneLine(it.text));
+      const openBtnHTML = isUrlItem(it)
+        ? `<button class="open-btn" data-id="${it.id}" title="Open in browser">↗</button>`
+        : '';
       li.innerHTML = `
         <div class="primary">${primaryHTML}</div>
         <div class="meta">
           ${new Date(it.ts || Date.now()).toLocaleString()}${ctx}
           <button class="pin-btn" data-id="${it.id}" title="${it.pinned ? 'Unpin' : 'Pin'}">${it.pinned ? '⭐' : '☆'}</button>
+          ${openBtnHTML}
           <button class="del-btn" data-id="${it.id}" title="Delete">🗑</button>
         </div>
       `;
@@ -97,29 +126,68 @@ function render(list) {
   });
 }
 
-/* Filtering */
+/* ---------- Tab scoping + sorting ---------- */
+function scopeByTab(all, tab) {
+  switch (tab) {
+    case 'images': return all.filter(i => i.type === 'image');
+    case 'urls':   return all.filter(isUrlItem);
+    case 'pinned': return all.filter(i => !!i.pinned);
+    case 'recent':
+    default:       return all.slice();
+  }
+}
+function sortCombined(list) {
+  list.sort((a,b) =>
+    (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) ||
+    (a._score ?? 1) - (b._score ?? 1) ||
+    new Date(b.ts) - new Date(a.ts)
+  );
+}
+
+/* ---------- Filter (search + tab) ---------- */
 async function applyFilter() {
   const q = searchEl.value.trim();
+  const scope = scopeByTab(items, currentTab);
+
+  const texts = scope.filter(i => i.type !== 'image');
+  const imgs  = scope.filter(i => i.type === 'image');
+
   if (!q) {
-    filtered = items.slice();
+    filtered = scope.slice();
+    sortCombined(filtered);
   } else {
-    const results = await window.api.fuzzySearch(items, q, {
+    // text search via preload (fuzzy/exact)
+    const textResults = await window.api.fuzzySearch(texts, q, {
       mode: cfg.searchMode,
       threshold: cfg.fuzzyThreshold,
     });
-    // images are intentionally excluded from search; results already only include text items
-    filtered = results;
+
+    // image "search" via metadata (dims/app/title)
+    let imgResults = [];
+    if (imgs.length) {
+      const qq = q.toLowerCase();
+      imgResults = imgs.filter(it => {
+        const dims = it.wh ? `${it.wh.w}x${it.wh.h}` : '';
+        const hay = `${dims} ${it?.source?.app || ''} ${it?.source?.title || ''}`.toLowerCase();
+        return hay.includes(qq);
+      }).map(it => ({ ...it, _score: 0.6, _matches: [] }));
+    }
+
+    filtered = [...textResults, ...imgResults];
+    sortCombined(filtered);
   }
+
   selectedIndex = 0;
   render(filtered);
 }
 
-/* Choose */
+/* ---------- Choose (copy/paste) ---------- */
 function chooseByRow(rowEl) {
   const index = Array.from(resultsEl.children).indexOf(rowEl);
   if (index < 0) return;
   const it = filtered[index];
   if (!it) return;
+
   if (it.type === 'image' && it.filePath) {
     window.api.setClipboard({ imagePath: it.filePath });
   } else {
@@ -128,10 +196,9 @@ function chooseByRow(rowEl) {
   window.api.hideOverlay();
 }
 
-/* Boot */
+/* ---------- Boot ---------- */
 async function boot() {
   items = await window.api.getHistory();
-  filtered = items.slice();
 
   const s = await window.api.getSettings();
   cfg = {
@@ -150,11 +217,25 @@ async function boot() {
   fuzzyThreshEl.value = String(cfg.fuzzyThreshold);
   fuzzyThreshVal.textContent = cfg.fuzzyThreshold.toFixed(2);
 
-  render(filtered);
+  // Tabs init & selection
+  if (tabsEl) {
+    const btns = Array.from(tabsEl.querySelectorAll('.tab'));
+    btns.forEach(b => b.classList.toggle('active', b.dataset.tab === currentTab));
+    tabsEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('.tab');
+      if (!btn) return;
+      currentTab = btn.dataset.tab || 'recent';
+      localStorage.setItem('clip_tab', currentTab);
+      btns.forEach(b => b.classList.toggle('active', b.dataset.tab === currentTab));
+      applyFilter();
+    });
+  }
+
+  applyFilter();
 }
 boot();
 
-/* IPC */
+/* ---------- IPC ---------- */
 window.api.onHistoryUpdate((latest) => { items = latest; applyFilter(); });
 window.api.onOverlayShow(async () => {
   items = await window.api.getHistory();
@@ -164,9 +245,16 @@ window.api.onOverlayShow(async () => {
 });
 window.api.onOverlayAnim((visible) => overlayCard?.classList.toggle('show', !!visible));
 
-/* UI */
-clearBtn.onclick = async () => { await window.api.clearHistory(); items = []; applyFilter(); };
-settingsBtn.onclick = () => { settingsEl.classList.add('open'); settingsEl.querySelector('input,select,button,textarea')?.focus(); };
+/* ---------- UI actions ---------- */
+clearBtn.onclick = async () => {
+  await window.api.clearHistory();
+  items = [];
+  applyFilter();
+};
+settingsBtn.onclick = () => {
+  settingsEl.classList.add('open');
+  settingsEl.querySelector('input,select,button,textarea')?.focus();
+};
 closeBtn.onclick = () => settingsEl.classList.remove('open');
 saveBtn.onclick = async () => {
   const payload = {
@@ -187,7 +275,7 @@ fuzzyThreshEl?.addEventListener('input', () => {
   fuzzyThreshVal.textContent = Number(fuzzyThreshEl.value).toFixed(2);
 });
 
-/* keyboard */
+/* ---------- Keyboard ---------- */
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { window.api.hideOverlay(); return; }
   if (e.key === 'ArrowDown') { e.preventDefault(); selectedIndex = Math.min(selectedIndex + 1, filtered.length - 1); render(filtered); return; }
@@ -198,11 +286,25 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-/* search input */
+/* ---------- Search ---------- */
 searchEl.addEventListener('input', () => applyFilter());
 
-/* clicks (delegate) */
+/* ---------- Click delegation (open url / pin / delete / choose) ---------- */
 resultsEl.addEventListener('click', async (e) => {
+  // Open URL button
+  const openBtn = e.target.closest('.open-btn');
+  if (openBtn) {
+    e.preventDefault(); e.stopPropagation();
+    const id = Number(openBtn.dataset.id);
+    const current = items.find(i => i.id === id);
+    if (current) {
+      const url = extractUrlFromText(current.text);
+      if (url) window.api.openUrl(url);
+    }
+    return;
+  }
+
+  // Pin toggle
   const pinBtn = e.target.closest('.pin-btn');
   if (pinBtn) {
     e.preventDefault(); e.stopPropagation();
@@ -214,6 +316,8 @@ resultsEl.addEventListener('click', async (e) => {
     applyFilter();
     return;
   }
+
+  // Delete
   const delBtn = e.target.closest('.del-btn');
   if (delBtn) {
     e.preventDefault(); e.stopPropagation();
@@ -223,11 +327,13 @@ resultsEl.addEventListener('click', async (e) => {
     applyFilter();
     return;
   }
+
+  // Row click -> copy
   const row = e.target.closest('li.row');
   if (row) chooseByRow(row);
 });
 
-/* click outside closes */
+/* ---------- Click outside card closes ---------- */
 document.addEventListener('mousedown', (e) => {
   if (!e.target.closest('.overlay')) window.api.hideOverlay();
 });

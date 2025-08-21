@@ -6,6 +6,7 @@ const {
   clipboard,
   ipcMain,
   nativeImage,
+  shell,
 } = require('electron');
 const path = require('path');
 const fs = require('fs');
@@ -345,6 +346,18 @@ ipcMain.handle('delete-history-item', async (_e, id) => {
   }
   return true;
 });
+
+ipcMain.handle('open-url', async (_event, url) => {
+  try {
+    await shell.openExternal(url);
+    return true;
+  } catch (error) {
+    console.error('Failed to open URL:', error);
+    return false;
+  }
+});
+
+
 
 /* ========= IPC: Settings ========= */
 ipcMain.handle('settings:get', () => ({

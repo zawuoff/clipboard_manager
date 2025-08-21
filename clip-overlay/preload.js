@@ -104,4 +104,7 @@ contextBridge.exposeInMainWorld('api', {
 
   // Search
   fuzzySearch: (items, query, opts) => fuzzyEngine(items, query, opts),
+
+  // Open URL
+  openUrl: (url) => ipcRenderer.invoke('open-url', url),
 });

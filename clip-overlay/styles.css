@@ -279,3 +279,56 @@ html, body { background: transparent !important; }
 .pin-btn:hover, .del-btn:hover { background: rgba(255,255,255,0.10); opacity: 1; }
 /* Highlight */
 .primary mark { background: rgba(90,160,255,0.28); padding: 0 2px; border-radius: 4px; }
+
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 12px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(to bottom, rgba(255,255,255,0.02), rgba(255,255,255,0));
+}
+.tab {
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-soft);
+  color: var(--text);
+  font-weight: 600;
+  text-transform: lowercase;
+  cursor: pointer;
+  user-select: none;
+}
+.tab:hover { background: rgba(255,255,255,0.10); }
+.tab.active {
+  background: rgba(127,177,255,0.16);
+  border-color: rgba(127,177,255,0.35);
+}
+
+/* Image row layout (already added earlier; keep if present) */
+.row.image { display: grid; grid-template-columns: 120px 1fr; align-items: center; gap: 12px; }
+.thumbwrap { padding: 6px; border-radius: 10px; background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06); }
+.thumb { display: block; width: 100%; height: auto; border-radius: 6px; }
+
+
+/* action buttons look & spacing */
+.meta { display: flex; align-items: center; gap: 10px; }
+.meta .pin-btn { margin-left: auto; } /* pushes the whole cluster to the right */
+
+.meta .open-btn,
+.meta .pin-btn,
+.meta .del-btn {
+  border: none;
+  background: transparent;
+  padding: 2px 6px;
+  border-radius: 8px;
+  opacity: .85;
+  cursor: pointer;
+}
+.meta .open-btn:hover,
+.meta .pin-btn:hover,
+.meta .del-btn:hover {
+  background: rgba(255,255,255,0.10);
+  opacity: 1;
+}

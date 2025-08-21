@@ -10,8 +10,8 @@
   <script defer src="renderer.js"></script>
 </head>
 <body>
-  <!-- Main overlay card only (no page-wide backdrop) -->
-  <div class="overlay" role="dialog" aria-modal="true" aria-label="Clipboard overlay">
+  <!-- Main overlay card only (no backdrop) -->
+  <div class="overlay show" role="dialog" aria-modal="true" aria-label="Clipboard overlay">
     <header class="toolbar">
       <input
         id="search" type="text" placeholder="Search your clipboard…"
@@ -20,8 +20,18 @@
       <button id="clearBtn" title="Clear history" aria-label="Clear history">🧹</button>
     </header>
 
+    <!-- NEW: Category tabs -->
+    <nav id="tabs" class="tabs" aria-label="Categories">
+      <button class="tab" data-tab="recent">recent</button>
+      <button class="tab" data-tab="images">images</button>
+      <button class="tab" data-tab="urls">urls</button>
+      <button class="tab" data-tab="pinned">pinned</button>
+    </nav>
+
+    <!-- Results list -->
     <ul id="results" class="results" role="listbox" aria-label="Clipboard items"></ul>
 
+    <!-- Settings sheet -->
     <section id="settings" class="sheet" aria-label="Settings">
       <h2>Settings</h2>
 

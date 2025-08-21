@@ -1,21 +1,58 @@
 {
-  "name": "clip-overlay",
+  "name": "snippetstash",
   "version": "0.1.0",
+  "description": "Clipboard Manager for Windows",
   "main": "main.js",
-  "type": "commonjs",
+  "author": "Fouwaz",
+  "license": "MIT",
   "scripts": {
-   "start": "electron .",
+    "start": "electron .",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
     "dev": "NODE_ENV=development electron .",
     "dev-win": "set NODE_ENV=development && electron ."
   },
-  
   "dependencies": {
-    "electron-store": "^8.2.0",
-    "fuse.js": "^6.6.2"
+    "electron-store": "^8.2.0"
   },
   "devDependencies": {
     "electron": "^30.0.0",
-    "electron-reload": "^2.0.0-alpha.1",
-    "rimraf": "^6.0.0"
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.fouwaz.snippetstash",
+    "productName": "SnippetStash",
+    "asar": true,
+    "files": [
+      "main.js",
+      "preload.js",
+      "renderer.js",
+      "overlay.html",
+      "styles.css",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "build"
+    },
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ],
+      "icon": "build/icons/icon.ico",
+      "artifactName": "${productName}-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "oneClick": true,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": false,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Clip Overlay"
+    },
+    "portable": {
+      "artifactName": "${productName}-Portable-${version}-${arch}.exe"
+    },
+    "publish": null
   }
 }
