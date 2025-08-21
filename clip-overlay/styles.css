@@ -1,197 +1,160 @@
-/* ================= Dark Glass Theme ================= */
-
-/* Base */
-:root{
-  --bg: #0f1115;
-  --panel: rgba(22, 24, 30, 0.82);
-  --panel-solid: #16181e;
-  --text: #e7eaf0;
-  --muted: #a9b0bd;
+/* ========== Reset & base ========== */
+* { box-sizing: border-box; }
+:root {
+  --bg: rgba(24, 24, 28, 0.92);
+  --bg-soft: rgba(255,255,255,0.06);
+  --text: #e9e9ec;
+  --text-dim: #b9bcc6;
+  --accent: #7fb1ff;
   --border: rgba(255,255,255,0.08);
-  --accent: #5aa0ff;
-  --accent-2: #7dd3fc;
   --shadow: 0 20px 60px rgba(0,0,0,0.55);
-  --radius: 14px;
-  --blur: 14px;
 }
 
 html, body {
   margin: 0;
-  padding: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji";
-  font-size: 14px;
   color: var(--text);
-  background: transparent; /* Electron overlay is transparent */
+  font: 14px/1.45 -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+   /* visible even with transparent window */
+  /* background: rgba(0,0,0,0.35); */
+  -webkit-font-smoothing: antialiased;
+  background: transparent !important;
 }
 
-/* Backdrop (click to close) */
+/* ========== Backdrop & overlay card ========== */
 #backdrop {
-  position: fixed;
-  inset: 0;
-  background: rgba(6, 8, 12, 0.45);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity .18s ease;
+  position: fixed; inset: 0;
+  background: rgba(0,0,0,0.35);
   z-index: 5;
 }
 
-.overlay.show ~ #backdrop {
-  opacity: 1;
-  pointer-events: auto;
-}
+#backdrop { display: none !important; }
 
-/* Overlay card */
 .overlay {
-  position: fixed;
-  top: 50%;
+  position: relative;
+  top: 2vh;
   left: 50%;
-  width: 720px;
-  max-width: 95vw;
-  height: 520px;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
+  transform: translateX(-50%);
+  width: 720px; max-width: 96vw;
+  height: 800px;
+  max-height: 96vh;
+  display: flex; flex-direction: column;
+  border-radius: 16px;
+  background: var(--bg);
+  backdrop-filter: blur(12px);
 
-  /* glass look */
-  background: var(--panel);
-  backdrop-filter: blur(var(--blur));
-  -webkit-backdrop-filter: blur(var(--blur));
   border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-
-  transform: translate(-50%, -45%) scale(0.96);
-  opacity: 0;
-  transition: transform .18s ease, opacity .18s ease;
+  overflow: hidden;
   z-index: 10;
 }
-.overlay.show {
-  transform: translate(-50%, -50%) scale(1);
-  opacity: 1;
-}
 
-/* Top bar */
-.bar {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px;
-  border-bottom: 1px solid var(--border);
-  background: linear-gradient(to bottom, rgba(255,255,255,0.04), rgba(255,255,255,0.01));
-}
+/* subtle show/hide animation hook (optional) */
+.overlay.show { animation: pop 120ms ease-out; }
+@keyframes pop { from { transform: translateX(-50%) scale(0.98); opacity: .94; } to { transform: translateX(-50%) scale(1); opacity: 1; } }
 
-.bar input {
-  flex: 1;
+/* ========== Toolbar ========== */
+.toolbar {
+  display: flex; align-items: center; gap: 8px;
   padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  background: linear-gradient(to bottom, rgba(255,255,255,0.03), rgba(255,255,255,0));
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+#search {
+  flex: 1; height: 36px;
+  padding: 0 12px;
   border-radius: 10px;
   border: 1px solid var(--border);
   background: rgba(255,255,255,0.06);
   color: var(--text);
   outline: none;
 }
-.bar input::placeholder { color: #95a0b2; }
-.bar input:focus {
-  border-color: rgba(90,160,255,.6);
-  box-shadow: 0 0 0 3px rgba(90,160,255,.18);
-  background: rgba(255,255,255,0.08);
-}
+#search::placeholder { color: #9ca3af; }
 
-.bar button {
+.toolbar button {
+  height: 36px; min-width: 36px;
   border: 1px solid var(--border);
-  background: rgba(255,255,255,0.06);
-  color: var(--text);
   border-radius: 10px;
-  padding: 8px 12px;
+  background: var(--bg-soft);
+  color: var(--text);
   cursor: pointer;
-  transition: background .15s ease, border-color .15s ease, transform .05s ease;
 }
-.bar button:hover {
-  background: rgba(255,255,255,0.10);
-  border-color: rgba(255,255,255,0.14);
-}
-.bar button:active { transform: translateY(1px); }
+.toolbar button:hover { background: rgba(255,255,255,0.10); }
 
-/* Results list */
-.list {
-  flex: 1 1 auto;
-  overflow-y: auto;
+/* ========== Results list ========== */
+.results {
   list-style: none;
-  margin: 0;
-  padding: 0;
+  margin: 0; padding: 6px 0 8px;
+  overflow: auto;
+  /* height: 100%; */
+  /* card max minus header minus sheet worst-case */
 }
 
 .row {
-  padding: 10px 12px;
+  padding: 10px 14px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
-  background: transparent;
-  transition: background .12s ease;
 }
 .row:hover { background: rgba(255,255,255,0.04); }
-.row.selected { background: rgba(90,160,255,0.14); }
+.row.selected { background: rgba(127,177,255,0.12); }
 
-.row .primary {
-  font-size: 14px;
-  line-height: 1.35;
+.primary {
+  font-size: 15px;
   color: var(--text);
-  margin-bottom: 4px;
   word-break: break-word;
-  text-shadow: 0 1px 0 rgba(0,0,0,0.25);
 }
-.row .meta {
+.meta {
+  margin-top: 4px;
   font-size: 12px;
-  color: var(--muted);
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  flex-wrap: wrap;
-  user-select: none;
+  color: var(--text-dim);
+  display: flex; align-items: center; gap: 10px;
 }
 
-.row .meta button {
+/* place controls on the right using the first control as a spacer */
+.meta .pin-btn { margin-left: auto; }
+.pin-btn, .del-btn {
   border: 1px solid var(--border);
-  background: rgba(255,255,255,0.05);
+  background: var(--bg-soft);
   color: var(--text);
-  cursor: pointer;
-  font-size: 13px;
-  padding: 2px 8px;
   border-radius: 8px;
-  transition: background .12s ease, border-color .12s ease, transform .05s ease;
+  padding: 2px 8px;
+  cursor: pointer;
 }
-.row .meta button:hover {
-  background: rgba(255,255,255,0.10);
-  border-color: rgba(255,255,255,0.14);
-}
-.row .meta button:active { transform: translateY(1px); }
+.pin-btn:hover, .del-btn:hover { background: rgba(255,255,255,0.10); }
 
-/* Settings panel */
-.settings {
+/* Fuzzy highlights */
+.primary mark {
+  background: rgba(90,160,255,0.28);
+  padding: 0 2px;
+  border-radius: 4px;
+}
+
+/* ========== Settings sheet ========== */
+#settings.sheet {
   position: absolute;
-  inset: 0;
-  background: var(--panel-solid);
-  color: var(--text);
-  padding: 18px;
-  overflow-y: auto;
-  z-index: 20;
-  border-left: 1px solid var(--border);
+  left: 0; right: 0; bottom: 0;
+  /* default hidden state */
+  display: none;
+  background: rgb(24,24,28);
+  border-top: 1px solid var(--border);
+  padding: 14px;
+  z-index: 20; /* above results */
+  max-height: 60vh;
+  overflow: auto;
 }
-.settings.hidden { display: none; }
+#settings.sheet.open { display: block; }
 
-.settings h3 {
-  margin: 4px 0 14px 0;
-  font-weight: 600;
-}
-
-.settings-row {
-  margin-bottom: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
+#settings h2 {
+  margin: 4px 0 12px;
+  font-size: 18px; font-weight: 700;
 }
 
-.settings-row input[type="text"],
-.settings-row input[type="number"] {
+#settings label { display:block; margin:10px 0; }
+#settings input[type="text"],
+#settings input[type="number"],
+#settings select {
+  width: 100%;
+  margin-top: 6px;
   padding: 8px 10px;
   border-radius: 8px;
   border: 1px solid var(--border);
@@ -199,40 +162,90 @@ html, body {
   color: var(--text);
   outline: none;
 }
-.settings-row input:focus {
-  border-color: rgba(90,160,255,.6);
-  box-shadow: 0 0 0 3px rgba(90,160,255,.18);
-  background: rgba(255,255,255,0.08);
+#settings .rowline { display:flex; align-items:center; gap:10px; }
+#settings hr { border: none; border-top: 1px solid var(--border); margin: 12px 0; }
+
+.smallhint { font-size:.85em; opacity:.75; margin:4px 0 8px; }
+.valuepill { display:inline-block; margin-left:8px; padding:2px 8px; border-radius:12px; background:rgba(255,255,255,.08); }
+
+#settings input[type="range"] {
+  width: 100%;
 }
 
-.settings-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 6px;
+/* Actions */
+#settings .actions {
+  display:flex; gap:10px; justify-content:flex-end; margin-top: 12px;
 }
-.settings-actions button {
-  padding: 8px 12px;
-  border-radius: 10px;
+#settings .actions button {
   border: 1px solid var(--border);
-  background: rgba(255,255,255,0.08);
+  background: var(--bg-soft);
   color: var(--text);
+  border-radius: 10px;
+  padding: 8px 12px;
   cursor: pointer;
 }
-.settings-actions button:hover {
-  background: rgba(255,255,255,0.12);
-  border-color: rgba(255,255,255,0.16);
+#settings .actions button:hover { background: rgba(255,255,255,0.10); }
+
+/* ========== Scrollbar (optional) ========== */
+.results::-webkit-scrollbar,
+#settings.sheet::-webkit-scrollbar { width: 10px; }
+.results::-webkit-scrollbar-thumb,
+#settings.sheet::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.18);
+  border-radius: 10px;
 }
 
-/* Scrollbar (subtle, dark) */
-.list::-webkit-scrollbar { width: 10px; }
-.list::-webkit-scrollbar-track { background: transparent; }
-.list::-webkit-scrollbar-thumb {
-  background: rgba(255,255,255,0.12);
+/* ========== OVERRIDES ========== */
+/* Ghost action buttons */
+.pin-btn, .del-btn {
+  border: none;
+  background: transparent;
+  padding: 2px 6px;
   border-radius: 8px;
-  border: 2px solid transparent;
-  background-clip: padding-box;
+  opacity: .75;
 }
-.list::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.18); }
+.pin-btn:hover, .del-btn:hover { background: rgba(255,255,255,0.10); opacity: 1; }
 
-/* Small helpers */
-.settings-open .bar input { pointer-events: none; opacity: .7; }
+/* Keep meta tidy with controls to the far right */
+.meta { gap: 10px; }
+.meta .pin-btn { margin-left: auto; } /* pushes both actions right */
+
+/* List breathing room */
+.results { padding: 8px 0 10px; }
+.row { padding: 12px 14px; }
+
+/* Slightly stronger glass fallback */
+.overlay { background: rgba(24,24,28,0.74); }  /* was 0.92 */
+
+
+/* Page must be fully transparent */
+html, body { background: transparent !important; }
+
+/* Ensure only the card has a background */
+.overlay {
+  position: relative;
+  top: 2.5vh; 
+  left: 50%; 
+  transform: translateX(-50%);
+  width: 100%;
+  max-height: 95vh;
+  display: flex; flex-direction: column;
+  border-radius: 16px;
+  background: rgba(24,24,28,0.94);   /* glass card */
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(255,255,255,0.08);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  z-index: 10;
+}
+
+body
+{
+  /* padding: 8px; */
+}
+
+/* (If you still have #backdrop from older CSS, neutralize it just in case) */
+#backdrop { display: none !important; background: transparent !important; }
+
+
+.overlay { box-shadow: 0 6px 24px rgba(0,0,0,0.22) !important; }

@@ -1,19 +1,21 @@
 {
-  "name": "snippetstash",
+  "name": "clip-overlay",
   "version": "0.1.0",
   "main": "main.js",
   "type": "commonjs",
   "scripts": {
-    "dev": "electron .",
-    "start": "electron .",
-    "clean": "rimraf dist out",
-    "prepare": "npm run ensure-deps"
+   "start": "electron .",
+    "dev": "NODE_ENV=development electron .",
+    "dev-win": "set NODE_ENV=development && electron ."
   },
+  
   "dependencies": {
-    "electron-store": "^8.2.0"
+    "electron-store": "^8.2.0",
+    "fuse.js": "^6.6.2"
   },
   "devDependencies": {
     "electron": "^30.0.0",
+    "electron-reload": "^2.0.0-alpha.1",
     "rimraf": "^6.0.0"
   }
 }

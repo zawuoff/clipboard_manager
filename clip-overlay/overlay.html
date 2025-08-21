@@ -1,47 +1,63 @@
-<!doctype html>
-<html>
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
+  <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'">
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+        content="default-src 'self'; script-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Clipboard Overlay</title>
   <link rel="stylesheet" href="styles.css" />
+  <script defer src="renderer.js"></script>
 </head>
 <body>
-  <!-- Backdrop (click to close) -->
-  <div id="backdrop"></div>
+  <!-- Main overlay card only (no page-wide backdrop) -->
+  <div class="overlay" role="dialog" aria-modal="true" aria-label="Clipboard overlay">
+    <header class="toolbar">
+      <input
+        id="search" type="text" placeholder="Search your clipboard…"
+        autocomplete="off" spellcheck="false" autofocus />
+      <button id="settingsBtn" title="Settings" aria-label="Settings">⚙</button>
+      <button id="clearBtn" title="Clear history" aria-label="Clear history">🧹</button>
+    </header>
 
-  <div class="overlay">
-    <div class="bar">
-      <input id="search" placeholder="Search your clipboard… (Esc to close)" />
-      <button id="clearBtn">Clear</button>
-      <button id="settingsBtn">⚙</button>
-    </div>
+    <ul id="results" class="results" role="listbox" aria-label="Clipboard items"></ul>
 
-    <ul id="results" class="list"></ul>
+    <section id="settings" class="sheet" aria-label="Settings">
+      <h2>Settings</h2>
 
-    <!-- Settings panel -->
-    <div id="settings" class="settings hidden">
-      <h3>Settings</h3>
-      <div class="settings-row">
-        <label>Hotkey</label>
-        <input id="hotkey" />
-      </div>
-      <div class="settings-row">
-        <label>Max items</label>
-        <input id="maxItems" type="number" min="50" max="5000" value="500" />
-      </div>
-      <div class="settings-row">
-        <label><input id="captureContext" type="checkbox" /> Try capture app/window context</label>
-      </div>
-      <div class="settings-actions">
+      <label>Hotkey
+        <input id="hotkey" type="text" placeholder="Ctrl+Shift+Space" />
+      </label>
+
+      <label>Max items
+        <input id="maxItems" type="number" min="50" max="5000" step="50" />
+      </label>
+
+      <label class="rowline">
+        <input id="captureContext" type="checkbox" />
+        Capture app/window context
+      </label>
+
+      <hr />
+
+      <label>Search mode
+        <select id="searchMode">
+          <option value="fuzzy">Fuzzy</option>
+          <option value="exact">Exact</option>
+        </select>
+      </label>
+
+      <label>Fuzzy sensitivity
+        <div class="smallhint">Lower = stricter • Higher = looser</div>
+        <input id="fuzzyThreshold" type="range" min="0.20" max="0.70" step="0.05" />
+        <div class="valuepill"><span id="fuzzyThresholdValue">0.50</span></div>
+      </label>
+
+      <div class="actions">
         <button id="saveSettings">Save</button>
         <button id="closeSettings">Close</button>
       </div>
-    </div>
+    </section>
   </div>
-
-  <script src="renderer.js"></script>
 </body>
 </html>

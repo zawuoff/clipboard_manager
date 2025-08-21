@@ -1,24 +1,28 @@
-// ---------- Helpers / refs ----------
 const $ = (sel) => document.querySelector(sel);
 
-const resultsEl    = $('#results');
-const searchEl     = $('#search');
-const settingsEl   = $('#settings');
-const hotkeyEl     = $('#hotkey');
-const maxItemsEl   = $('#maxItems');
-const captureEl    = $('#captureContext');
-const clearBtn     = $('#clearBtn');
-const settingsBtn  = $('#settingsBtn');
-const saveBtn      = $('#saveSettings');
-const closeBtn     = $('#closeSettings');
-const backdropEl   = $('#backdrop');
-const overlayCard  = document.querySelector('.overlay');
+const resultsEl   = $('#results');
+const searchEl    = $('#search');
+const settingsEl  = $('#settings');
+const hotkeyEl    = $('#hotkey');
+const maxItemsEl  = $('#maxItems');
+const captureEl   = $('#captureContext');
+const clearBtn    = $('#clearBtn');
+const settingsBtn = $('#settingsBtn');
+const saveBtn     = $('#saveSettings');
+const closeBtn    = $('#closeSettings');
+const backdropEl  = $('#backdrop');
+const overlayCard = document.querySelector('.overlay');
+
+// NEW settings controls
+const searchModeEl    = $('#searchMode');
+const fuzzyThreshEl   = $('#fuzzyThreshold');
+const fuzzyThreshVal  = $('#fuzzyThresholdValue');
 
 let items = [];
 let filtered = [];
 let selectedIndex = 0;
+let cfg = { searchMode: 'fuzzy', fuzzyThreshold: 0.5 };
 
-// ---------- Utils ----------
 function escapeHTML(s='') {
   return String(s).replace(/[&<>"']/g,(m)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
 }
@@ -26,57 +30,72 @@ function trimOneLine(s='') {
   const t = s.trim().replace(/\s+/g,' ');
   return t.length>140 ? t.slice(0,140)+'…' : t;
 }
+function highlightPrimary(text, matches) {
+  if (!matches || !matches.length) return escapeHTML(trimOneLine(text));
+  const m = matches.find(x => x.key === 'text');
+  if (!m) return escapeHTML(trimOneLine(text));
+  const oneLine = trimOneLine(text);
+  let html = '';
+  let last = 0;
+  const maxLen = oneLine.length;
+  (m.indices || []).forEach(([start,end]) => {
+    if (start >= maxLen) return;
+    const s = Math.max(0, start);
+    const e = Math.min(maxLen - 1, end);
+    if (e < 0) return;
+    html += escapeHTML(oneLine.slice(last, s));
+    html += `<mark>${escapeHTML(oneLine.slice(s, e + 1))}</mark>`;
+    last = e + 1;
+  });
+  html += escapeHTML(oneLine.slice(last));
+  return html;
+}
 
-// ---------- Render ----------
 function render(list) {
   resultsEl.innerHTML = '';
-
   if (!list.length) {
     const li = document.createElement('li');
     li.className = 'row';
-    li.innerHTML = `
-      <div class="primary">No items yet</div>
-      <div class="meta">Copy something (Ctrl+C), then hit your hotkey to find it fast.</div>
-    `;
+    li.innerHTML = `<div class="primary">No matching items</div><div class="meta">Try a different query or clear search.</div>`;
     resultsEl.appendChild(li);
     return;
   }
-
   list.forEach((it, idx) => {
     const li = document.createElement('li');
     li.className = 'row' + (idx === selectedIndex ? ' selected' : '');
-
-    const ctx = it.source
-      ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}`
-      : '';
-
+    const ctx = it.source ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}` : '';
+    const primaryHTML = it._matches ? highlightPrimary(it.text, it._matches) : escapeHTML(trimOneLine(it.text));
     li.innerHTML = `
-      <div class="primary">${escapeHTML(trimOneLine(it.text))}</div>
+      <div class="primary">${primaryHTML}</div>
       <div class="meta">
         ${new Date(it.ts || Date.now()).toLocaleString()}${ctx}
-        <button class="pin-btn" data-id="${it.id}" title="${it.pinned ? 'Unpin' : 'Pin'}">
-          ${it.pinned ? '⭐' : '☆'}
-        </button>
+        <button class="pin-btn" data-id="${it.id}" title="${it.pinned ? 'Unpin' : 'Pin'}">${it.pinned ? '⭐' : '☆'}</button>
         <button class="del-btn" data-id="${it.id}" title="Delete">🗑</button>
-      </div>
-    `;
+      </div>`;
     resultsEl.appendChild(li);
   });
 }
 
-// ---------- Filtering ----------
-function applyFilter() {
-  const q = searchEl.value.trim().toLowerCase();
+async function applyFilter() {
+  const q = searchEl.value.trim();
   if (!q) {
     filtered = items.slice();
   } else {
-    filtered = items.filter(it => (it.text || '').toLowerCase().includes(q));
+    const results = await window.api.fuzzySearch(items, q, {
+      mode: cfg.searchMode,
+      threshold: cfg.fuzzyThreshold,
+    });
+    results.sort((a,b) =>
+      (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) ||
+      (a._score ?? 1) - (b._score ?? 1) ||
+      new Date(b.ts) - new Date(a.ts)
+    );
+    filtered = results;
   }
   selectedIndex = 0;
   render(filtered);
 }
 
-// ---------- Choose / copy ----------
 function chooseByRow(rowEl) {
   const index = Array.from(resultsEl.children).indexOf(rowEl);
   if (index < 0) return;
@@ -86,114 +105,88 @@ function chooseByRow(rowEl) {
   window.api.hideOverlay();
 }
 
-// ---------- Boot ----------
 async function boot() {
   items = await window.api.getHistory();
   filtered = items.slice();
 
   const s = await window.api.getSettings();
-  hotkeyEl.value = s.hotkey || '';
-  maxItemsEl.value = s.maxItems || 500;
-  captureEl.checked = !!s.captureContext;
+  cfg = {
+    hotkey: s.hotkey,
+    maxItems: s.maxItems,
+    captureContext: !!s.captureContext,
+    theme: s.theme || 'light',
+    searchMode: s.searchMode || 'fuzzy',
+    fuzzyThreshold: Number.isFinite(+s.fuzzyThreshold) ? +s.fuzzyThreshold : 0.5,
+  };
+
+  hotkeyEl.value = cfg.hotkey || '';
+  maxItemsEl.value = cfg.maxItems || 500;
+  captureEl.checked = !!cfg.captureContext;
+
+  // init UI for new controls
+  searchModeEl.value = cfg.searchMode;
+  fuzzyThreshEl.value = String(cfg.fuzzyThreshold);
+  fuzzyThreshVal.textContent = cfg.fuzzyThreshold.toFixed(2);
 
   render(filtered);
 }
 boot();
 
-// ---------- IPC listeners ----------
-window.api.onHistoryUpdate(async (latest) => {
-  items = latest;
-  applyFilter();
-});
-
+// IPC
+window.api.onHistoryUpdate((latest) => { items = latest; applyFilter(); });
 window.api.onOverlayShow(async () => {
   items = await window.api.getHistory();
   applyFilter();
   searchEl.focus();
   searchEl.select();
 });
+window.api.onOverlayAnim((visible) => overlayCard?.classList.toggle('show', !!visible));
 
-window.api.onOverlayAnim((visible) => {
-  overlayCard?.classList.toggle('show', !!visible);
-});
-
-// ---------- UI ----------
-clearBtn.onclick = async () => {
-  await window.api.clearHistory();
-  items = [];
+// UI
+clearBtn.onclick = async () => { await window.api.clearHistory(); items = []; applyFilter(); };
+settingsBtn.onclick = () => { settingsEl.classList.add('open'); settingsEl.querySelector('input,select,button,textarea')?.focus(); };
+closeBtn.onclick = () => settingsEl.classList.remove('open');
+saveBtn.onclick = async () => {
+  const payload = {
+    hotkey: hotkeyEl.value,
+    maxItems: Number(maxItemsEl.value || 500),
+    captureContext: !!captureEl.checked,
+    theme: 'light',
+    searchMode: searchModeEl.value,
+    fuzzyThreshold: Number(fuzzyThreshEl.value || 0.5),
+  };
+  await window.api.saveSettings(payload);
+  cfg.searchMode = payload.searchMode;
+  cfg.fuzzyThreshold = payload.fuzzyThreshold;
+  settingsEl.classList.remove('open');
   applyFilter();
 };
 
-settingsBtn.onclick = () => openSettings();
-closeBtn.onclick = () => closeSettings();
-saveBtn.onclick = async () => {
-  await window.api.saveSettings({
-    hotkey: hotkeyEl.value.trim() || 'CommandOrControl+Shift+Space',
-    maxItems: Math.max(50, Math.min(5000, parseInt(maxItemsEl.value || '500', 10))),
-    captureContext: !!captureEl.checked,
-  });
-  closeSettings();
-  searchEl.focus();
-};
+// Close if you click anywhere that's NOT the card
+document.addEventListener('mousedown', (e) => {
+  if (!e.target.closest('.overlay')) window.api.hideOverlay();
+});
 
-function openSettings() {
-  settingsEl.classList.remove('hidden');
-  document.body.classList.add('settings-open');
-  hotkeyEl.focus();
-}
-function closeSettings() {
-  settingsEl.classList.add('hidden');
-  document.body.classList.remove('settings-open');
-}
 
-searchEl.addEventListener('input', applyFilter);
+// live preview of threshold value
+fuzzyThreshEl?.addEventListener('input', () => {
+  fuzzyThreshVal.textContent = Number(fuzzyThreshEl.value).toFixed(2);
+});
 
+// keyboard
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    e.preventDefault();
-    if (!settingsEl.classList.contains('hidden')) closeSettings();
-    else window.api.hideOverlay();
-  }
-  if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    if (!filtered.length) return;
-    selectedIndex = (selectedIndex + 1) % filtered.length;
-    render(filtered);
-    resultsEl.querySelector('.selected')?.scrollIntoView({ block: 'nearest' });
-  }
-  if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    if (!filtered.length) return;
-    selectedIndex = (selectedIndex - 1 + filtered.length) % filtered.length;
-    render(filtered);
-    resultsEl.querySelector('.selected')?.scrollIntoView({ block: 'nearest' });
-  }
+  if (e.key === 'Escape') { window.api.hideOverlay(); return; }
+  if (e.key === 'ArrowDown') { e.preventDefault(); selectedIndex = Math.min(selectedIndex + 1, filtered.length - 1); render(filtered); return; }
+  if (e.key === 'ArrowUp') { e.preventDefault(); selectedIndex = Math.max(selectedIndex - 1, 0); render(filtered); return; }
   if (e.key === 'Enter') {
-    e.preventDefault();
     const row = resultsEl.children[selectedIndex];
     if (row) chooseByRow(row);
   }
 });
 
-backdropEl.onclick = () => {
-  if (!settingsEl.classList.contains('hidden')) closeSettings();
-  else window.api.hideOverlay();
-};
+searchEl.addEventListener('input', () => applyFilter());
 
-// ---------- Delegated clicks (pin, delete, row) ----------
 resultsEl.addEventListener('click', async (e) => {
-  // delete
-  const delBtn = e.target.closest('.del-btn');
-  if (delBtn) {
-    e.preventDefault(); e.stopPropagation();
-    const id = Number(delBtn.dataset.id);
-    await window.api.deleteHistoryItem(id);
-    items = await window.api.getHistory();
-    applyFilter();
-    return;
-  }
-
-  // pin
   const pinBtn = e.target.closest('.pin-btn');
   if (pinBtn) {
     e.preventDefault(); e.stopPropagation();
@@ -205,8 +198,17 @@ resultsEl.addEventListener('click', async (e) => {
     applyFilter();
     return;
   }
-
-  // row select
+  const delBtn = e.target.closest('.del-btn');
+  if (delBtn) {
+    e.preventDefault(); e.stopPropagation();
+    const id = Number(delBtn.dataset.id);
+    await window.api.deleteHistoryItem(id);
+    items = await window.api.getHistory();
+    applyFilter();
+    return;
+  }
   const row = e.target.closest('li.row');
   if (row) chooseByRow(row);
 });
+
+backdropEl?.addEventListener('click', () => window.api.hideOverlay());

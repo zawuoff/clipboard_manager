@@ -6,9 +6,14 @@ const {
   ipcMain,
 } = require('electron');
 const path = require('path');
-const Store = require('electron-store'); // v8 CJS
+const Store = require('electron-store');
 
-// ---------------- Stores ----------------
+// only for dev purposes for testing live changes
+//paste after the requires and before the stores
+if (process.env.NODE_ENV !== 'production') {
+  require('electron-reload')(__dirname);
+}
+
 const settingsStore = new Store({
   name: 'settings',
   defaults: {
@@ -16,6 +21,8 @@ const settingsStore = new Store({
     maxItems: 500,
     captureContext: false,
     theme: 'light',
+    searchMode: 'fuzzy',       // NEW
+    fuzzyThreshold: 0.5,       // NEW (0.2 strict … 0.7 loose)
   },
 });
 
@@ -24,11 +31,10 @@ const historyStore = new Store({
   defaults: { items: [] },
 });
 
-// ---------------- State ----------------
 let overlayWin = null;
 let clipboardPollTimer = null;
 let lastClipboardText = '';
-let activeWinGetter = null; // lazy-loaded if captureContext = true
+let activeWinGetter = null;
 
 async function maybeLoadActiveWin() {
   if (!settingsStore.get('captureContext')) return null;
@@ -42,7 +48,6 @@ async function maybeLoadActiveWin() {
   return activeWinGetter;
 }
 
-// ---------------- Overlay ----------------
 function createOverlay() {
   if (overlayWin) return overlayWin;
 
@@ -55,22 +60,19 @@ function createOverlay() {
     resizable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
+    hasShadow: false,
     backgroundColor: '#00000000',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      backgroundThrottling: false, // keep UI responsive
+      backgroundThrottling: false,
+      sandbox: false, // keep preload Node available
     },
   });
 
   overlayWin.on('closed', () => { overlayWin = null; });
-  overlayWin.on('blur', () => { // close-on-blur
-    if (!overlayWin) return;
-    overlayWin.webContents.send('overlay:anim', false);
-    overlayWin.hide();
-  });
-
+  overlayWin.on('blur', () => { if (overlayWin) overlayWin.hide(); });
   overlayWin.loadFile('overlay.html');
   return overlayWin;
 }
@@ -90,18 +92,15 @@ ipcMain.handle('overlay:hide', () => {
   overlayWin.hide();
 });
 
-// ---------------- Hotkey ----------------
 function registerHotkey() {
   const hk = (settingsStore.get('hotkey') || 'CommandOrControl+Shift+Space').trim();
   globalShortcut.unregisterAll();
   const ok = globalShortcut.register(hk, () => showOverlay());
   if (!ok) {
-    // fallback
     globalShortcut.register('CommandOrControl+Shift+Space', () => showOverlay());
   }
 }
 
-// ---------------- Clipboard polling ----------------
 function startClipboardPolling() {
   if (clipboardPollTimer) clearInterval(clipboardPollTimer);
 
@@ -111,7 +110,6 @@ function startClipboardPolling() {
     if (text === lastClipboardText) return;
     lastClipboardText = text;
 
-    // context (optional)
     let source = undefined;
     if (settingsStore.get('captureContext')) {
       try {
@@ -124,8 +122,6 @@ function startClipboardPolling() {
     }
 
     const items = historyStore.get('items') || [];
-
-    // de-dupe newest text
     if (items.length && items[0].text === text) return;
 
     items.unshift({
@@ -136,7 +132,6 @@ function startClipboardPolling() {
       ts: new Date().toISOString(),
     });
 
-    // pinned first, then newest
     items.sort(
       (a, b) =>
         (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) ||
@@ -153,12 +148,9 @@ function startClipboardPolling() {
   }, 700);
 }
 
-// ---------------- IPC: history ----------------
+// IPC: history
 ipcMain.handle('history:get', () => historyStore.get('items') || []);
-ipcMain.handle('history:clear', () => {
-  historyStore.set('items', []);
-  return true;
-});
+ipcMain.handle('history:clear', () => { historyStore.set('items', []); return true; });
 ipcMain.handle('history:updateItem', (_e, { id, patch }) => {
   const items = historyStore.get('items') || [];
   const idx = items.findIndex(i => i.id === id);
@@ -185,46 +177,38 @@ ipcMain.handle('delete-history-item', (_e, id) => {
   return true;
 });
 
-// ---------------- IPC: settings ----------------
+// IPC: settings
 ipcMain.handle('settings:get', () => ({
   hotkey: settingsStore.get('hotkey'),
   maxItems: settingsStore.get('maxItems'),
   captureContext: settingsStore.get('captureContext'),
   theme: settingsStore.get('theme'),
+  searchMode: settingsStore.get('searchMode'),
+  fuzzyThreshold: settingsStore.get('fuzzyThreshold'),
 }));
 ipcMain.handle('settings:save', (_e, s) => {
   settingsStore.set('hotkey', s.hotkey || 'CommandOrControl+Shift+Space');
   settingsStore.set('maxItems', Math.max(50, Math.min(5000, parseInt(s.maxItems || 500, 10))));
   settingsStore.set('captureContext', !!s.captureContext);
   settingsStore.set('theme', s.theme || 'light');
+  settingsStore.set('searchMode', s.searchMode === 'exact' ? 'exact' : 'fuzzy');
+  const th = Number.isFinite(+s.fuzzyThreshold) ? Math.min(0.9, Math.max(0.1, +s.fuzzyThreshold)) : 0.5;
+  settingsStore.set('fuzzyThreshold', th);
   registerHotkey();
   return true;
 });
 
-// ---------------- IPC: clipboard ----------------
-ipcMain.handle('clipboard:set', (_e, data) => {
-  if (data?.text) clipboard.writeText(data.text);
-  return true;
-});
+// IPC: clipboard
+ipcMain.handle('clipboard:set', (_e, data) => { if (data?.text) clipboard.writeText(data.text); return true; });
 
-// ---------------- Single instance & lifecycle ----------------
-app.setAppUserModelId('clip-overlay'); // good practice on Windows
+// Lifecycle
+app.setAppUserModelId('clip-overlay');
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
 } else {
-  app.on('second-instance', () => {
-    showOverlay();
-  });
-
-  app.whenReady().then(() => {
-    createOverlay();
-    registerHotkey();
-    startClipboardPolling();
-  });
-
-  app.on('will-quit', () => {
-    globalShortcut.unregisterAll();
-  });
+  app.on('second-instance', () => showOverlay());
+  app.whenReady().then(() => { createOverlay(); registerHotkey(); startClipboardPolling(); });
+  app.on('will-quit', () => globalShortcut.unregisterAll());
 }
