@@ -36,8 +36,14 @@
       <h2>Settings</h2>
 
       <label>Hotkey
-        <input id="hotkey" type="text" placeholder="Ctrl+Shift+Space" />
+        <div class="hotkey-row">
+          <input id="hotkey" type="text" readonly placeholder="Ctrl+Shift+Space" />
+          <button id="recordHotkey" type="button" title="Record new hotkey">● Rec</button>
+          <button id="resetHotkey" type="button" title="Reset">Reset</button>
+        </div>
+        <div class="smallhint">Click “Rec”, press your shortcut (e.g., Ctrl+Alt+K). Enter to confirm • Esc to cancel.</div>
       </label>
+
 
       <label>Max items
         <input id="maxItems" type="number" min="50" max="5000" step="50" />

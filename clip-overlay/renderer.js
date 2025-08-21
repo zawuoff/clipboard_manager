@@ -19,7 +19,11 @@ const overlayCard = document.querySelector('.overlay');
 /* Tabs */
 const tabsEl = $('#tabs');
 
-/* Settings (search/fuzzy) */
+/* Hotkey record buttons */
+const recordHotkeyBtn = $('#recordHotkey');
+const resetHotkeyBtn  = $('#resetHotkey');
+
+/* Search (settings) */
 const searchModeEl   = $('#searchMode');
 const fuzzyThreshEl  = $('#fuzzyThreshold');
 const fuzzyThreshVal = $('#fuzzyThresholdValue');
@@ -30,6 +34,7 @@ let filtered = [];
 let selectedIndex = 0;
 let cfg = { searchMode: 'fuzzy', fuzzyThreshold: 0.5 };
 let currentTab = localStorage.getItem('clip_tab') || 'recent';
+let recordingHotkey = false;
 
 /* ---------- Utils ---------- */
 function escapeHTML(s='') {
@@ -47,9 +52,7 @@ function highlightPrimary(text, matches) {
   let html = ''; let last = 0; const maxLen = oneLine.length;
   (m.indices || []).forEach(([start,end]) => {
     if (start >= maxLen) return;
-    const s = Math.max(0, start);
-    const e = Math.min(maxLen - 1, end);
-    if (e < 0) return;
+    const s = Math.max(0, start); const e = Math.min(maxLen - 1, end); if (e < 0) return;
     html += escapeHTML(oneLine.slice(last, s));
     html += `<mark>${escapeHTML(oneLine.slice(s, e + 1))}</mark>`;
     last = e + 1;
@@ -59,14 +62,13 @@ function highlightPrimary(text, matches) {
 }
 
 /* ---------- URL helpers ---------- */
-const URL_RE = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;              // detect
-const URL_EXTRACT_RE = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;      // extract first
+const URL_RE = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;
+const URL_EXTRACT_RE = /(https?:\/\/[^\s]+|www\.[^\s]+)/i;
 function extractUrlFromText(text = "") {
   const m = String(text).match(URL_EXTRACT_RE);
   if (!m) return null;
   let url = m[0];
-  // strip common trailing punctuation/brackets
-  url = url.replace(/[)\]\}>,.;!?]+$/g, '');
+  url = url.replace(/[)\]\}>,.;!?]+$/g, ''); // trim trailing punctuation
   return url;
 }
 const isUrlItem = (it) => it.type === 'text' && URL_RE.test(String(it.text || ''));
@@ -105,7 +107,7 @@ function render(list) {
         </div>
       `;
     } else {
-      // Text row (with URL open button when applicable)
+      // Text row (URL gets an "Open" button)
       const ctx = it.source ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}` : '';
       const primaryHTML = it._matches ? highlightPrimary(it.text, it._matches) : escapeHTML(trimOneLine(it.text));
       const openBtnHTML = isUrlItem(it)
@@ -196,6 +198,122 @@ function chooseByRow(rowEl) {
   window.api.hideOverlay();
 }
 
+/* ---------- Hotkey recorder ---------- */
+function keyFromEvent(e) {
+  const c = e.code;
+
+  // Letters / Digits
+  if (/^Key[A-Z]$/.test(c)) return c.slice(3);
+  if (/^Digit[0-9]$/.test(c)) return c.slice(5);
+
+  // Function keys
+  if (/^F[1-9][0-9]?$/.test(e.key)) return e.key.toUpperCase();
+
+  // Arrows
+  if (c === 'ArrowUp') return 'Up';
+  if (c === 'ArrowDown') return 'Down';
+  if (c === 'ArrowLeft') return 'Left';
+  if (c === 'ArrowRight') return 'Right';
+
+  // Editing / control
+  const map = {
+    Escape: 'Esc',
+    Enter: 'Enter',
+    Space: 'Space',
+    Tab: 'Tab',
+    Backspace: 'Backspace',
+    Delete: 'Delete',
+    Insert: 'Insert',
+    Home: 'Home',
+    End: 'End',
+    PageUp: 'PageUp',
+    PageDown: 'PageDown',
+    PrintScreen: 'PrintScreen',
+    CapsLock: 'CapsLock',
+    ContextMenu: 'ContextMenu',
+  };
+  if (map[c]) return map[c];
+
+  // Numpad
+  if (/^Numpad[0-9]$/.test(c)) return 'num' + c.slice(6);
+  const numMap = {
+    NumpadAdd: 'numadd',
+    NumpadSubtract: 'numsub',
+    NumpadMultiply: 'nummult',
+    NumpadDivide: 'numdiv',
+    NumpadDecimal: 'numdec',
+  };
+  if (numMap[c]) return numMap[c];
+
+  // Punctuation (common)
+  const punct = {
+    Minus: 'Minus',
+    Equal: 'Plus',
+    Backquote: 'Backquote',
+    BracketLeft: 'BracketLeft',
+    BracketRight: 'BracketRight',
+    Semicolon: 'Semicolon',
+    Quote: 'Quote',
+    Comma: 'Comma',
+    Period: 'Period',
+    Slash: 'Slash',
+    Backslash: 'Backslash',
+  };
+  if (punct[c]) return punct[c];
+
+  return '';
+}
+
+function buildAcceleratorFromEvent(e) {
+  const mods = [];
+  if (e.ctrlKey) mods.push('CommandOrControl');
+  if (e.shiftKey) mods.push('Shift');
+  if (e.altKey) mods.push('Alt');
+  if (e.metaKey) mods.push('Super');
+  if (e.getModifierState && e.getModifierState('AltGraph')) mods.push('AltGr');
+
+  const base = keyFromEvent(e);
+  if (!base) return '';
+  return mods.concat(base).join('+');
+}
+
+function startRecordingHotkey() {
+  if (recordingHotkey) return;
+  recordingHotkey = true;
+  recordHotkeyBtn.classList.add('recording');
+  recordHotkeyBtn.textContent = 'Recording…';
+  hotkeyEl.value = 'Press keys… (Esc to cancel)';
+
+  const onKeyDown = (e) => {
+    // capture at window level so inputs can’t swallow it
+    e.preventDefault();
+    e.stopPropagation();
+
+    // cancel / confirm
+    if (e.key === 'Escape') return stop(false);
+    if (e.key === 'Enter')  return stop(true);
+
+    const acc = buildAcceleratorFromEvent(e);
+    if (acc) {
+      hotkeyEl.value = acc;
+      stop(true); // auto-finish once a valid base key is pressed
+    }
+  };
+
+  function stop(keepValue) {
+    recordingHotkey = false;
+    recordHotkeyBtn.classList.remove('recording');
+    recordHotkeyBtn.textContent = 'Rec';
+    if (!keepValue) hotkeyEl.value = cfg.hotkey || '';
+    window.removeEventListener('keydown', onKeyDown, true);
+    document.removeEventListener('keydown', onKeyDown, true);
+  }
+
+  // capture phase listeners (belt & suspenders)
+  window.addEventListener('keydown', onKeyDown, true);
+  document.addEventListener('keydown', onKeyDown, true);
+}
+
 /* ---------- Boot ---------- */
 async function boot() {
   items = await window.api.getHistory();
@@ -265,18 +383,26 @@ saveBtn.onclick = async () => {
     searchMode: searchModeEl.value,
     fuzzyThreshold: Number(fuzzyThreshEl.value || 0.5),
   };
-  await window.api.saveSettings(payload);
+  await window.api.saveSettings(payload);   // main.js calls registerHotkey()
+  cfg.hotkey = payload.hotkey;
   cfg.searchMode = payload.searchMode;
   cfg.fuzzyThreshold = payload.fuzzyThreshold;
   settingsEl.classList.remove('open');
-  applyFilter();
 };
+
 fuzzyThreshEl?.addEventListener('input', () => {
   fuzzyThreshVal.textContent = Number(fuzzyThreshEl.value).toFixed(2);
 });
 
-/* ---------- Keyboard ---------- */
+/* Hotkey recording buttons */
+recordHotkeyBtn?.addEventListener('click', () => startRecordingHotkey());
+resetHotkeyBtn?.addEventListener('click', () => {
+  hotkeyEl.value = 'CommandOrControl+Shift+Space';
+});
+
+/* ---------- Keyboard (list navigation) ---------- */
 document.addEventListener('keydown', (e) => {
+  if (recordingHotkey) return; // don't steal keys while recording
   if (e.key === 'Escape') { window.api.hideOverlay(); return; }
   if (e.key === 'ArrowDown') { e.preventDefault(); selectedIndex = Math.min(selectedIndex + 1, filtered.length - 1); render(filtered); return; }
   if (e.key === 'ArrowUp') { e.preventDefault(); selectedIndex = Math.max(selectedIndex - 1, 0); render(filtered); return; }

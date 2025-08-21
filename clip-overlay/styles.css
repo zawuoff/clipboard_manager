@@ -332,3 +332,7 @@ html, body { background: transparent !important; }
   background: rgba(255,255,255,0.10);
   opacity: 1;
 }
+
+.hotkey-row { display:flex; gap:8px; align-items:center; }
+#hotkey { flex: 1 1 auto; }
+#recordHotkey.recording { background: rgba(255,80,80,0.25); border:1px solid rgba(255,80,80,0.6); }
