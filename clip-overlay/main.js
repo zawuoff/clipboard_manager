@@ -1,5 +1,4 @@
-// main.js (stable dev build with offline OCR; electron-store ESM fix)
-
+// main.js — adds safe "Capture app/window context"
 const {
   app, BrowserWindow, globalShortcut, clipboard, ipcMain, nativeImage, shell,
 } = require('electron');
@@ -8,44 +7,58 @@ const fs = require('fs');
 const fsp = fs.promises;
 const crypto = require('crypto');
 
-// ESM-only electron-store fix: use default export when available
-const StoreModule = require('electron-store');
-const Store = StoreModule.default || StoreModule;
+const StoreMod = require('electron-store');
+const Store = StoreMod.default || StoreMod;
 
 const { createWorker } = require('tesseract.js');
 
 let ocrWorker;
 
-/* ---------- Resolve ENG data (DEV) ---------- */
+/* ---------- Tesseract language resolution (local/resources/node_modules) ---------- */
 function findEngModelDir(baseDir) {
-  const stack = [baseDir];
-  while (stack.length) {
-    const dir = stack.pop();
-    let entries = [];
-    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
-    for (const e of entries) {
-      const p = path.join(dir, e.name);
-      if (e.isDirectory()) stack.push(p);
-      else if (/^eng\.traineddata(\.gz)?$/i.test(e.name)) {
-        return { dir: path.dirname(p), gzip: e.name.toLowerCase().endsWith('.gz') };
+  if (!baseDir) return null;
+  try {
+    const stack = [baseDir];
+    while (stack.length) {
+      const dir = stack.pop();
+      let entries = [];
+      try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+      for (const e of entries) {
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) stack.push(p);
+        else if (/^eng\.traineddata(\.gz)?$/i.test(e.name)) {
+          return { dir: path.dirname(p), gzip: e.name.toLowerCase().endsWith('.gz') };
+        }
       }
     }
-  }
+  } catch {}
   return null;
 }
-function resolveEngDev() {
+function resolveFromNodeModules() {
   try {
     const base = path.dirname(require.resolve('@tesseract.js-data/eng/package.json'));
     return findEngModelDir(base);
   } catch { return null; }
 }
+function resolveEngData() {
+  const local = findEngModelDir(path.join(process.cwd(), 'tessdata', 'eng'));
+  if (local) return { ...local, origin: 'local' };
+
+  const res = findEngModelDir(path.join(process.resourcesPath || '', 'tessdata', 'eng'));
+  if (res) return { ...res, origin: 'resources' };
+
+  const mod = resolveFromNodeModules();
+  if (mod) return { ...mod, origin: 'node_modules' };
+
+  return null;
+}
 async function getOcrWorker() {
   if (ocrWorker) return ocrWorker;
-  const found = resolveEngDev();
-  if (!found) throw new Error('ENG data not found. Install @tesseract.js-data/eng');
-  console.log('[ocr] dev langDir =', found.dir, 'gzip:', found.gzip);
+  const found = resolveEngData();
+  if (!found) throw new Error('ENG model not found. Provide tessdata/eng/.../eng.traineddata(.gz) or install @tesseract.js-data/eng');
+  console.log(`[ocr] langDir = ${found.dir}  origin: ${found.origin}  gzip: ${found.gzip}`);
   ocrWorker = await createWorker('eng', undefined, {
-    langPath: found.dir,   // dev: plain path OK
+    langPath: found.dir,
     gzip: found.gzip,
     cachePath: path.join(app.getPath('userData'), 'tess-cache'),
     workerBlobURL: false,
@@ -58,12 +71,12 @@ app.on('will-quit', async () => { try { await ocrWorker?.terminate(); } catch {}
 const settingsStore = new Store({
   name: 'settings',
   defaults: {
+    theme: 'dark',
     hotkey: 'CommandOrControl+Shift+Space',
     maxItems: 500,
-    captureContext: false,
-    theme: 'dark',
+    captureContext: false,       // UI toggle; now honored
     searchMode: 'fuzzy',
-    fuzzyThreshold: 0.5,
+    fuzzyThreshold: 0.4,
   },
 });
 const historyStore = new Store({ name: 'history', defaults: { items: [] } });
@@ -73,7 +86,78 @@ let overlayWin = null;
 let clipboardPollTimer = null;
 let lastClipboardText = '';
 let lastImageHash = '';
-let activeWinGetter = null;
+
+/* ---------- Context capture (active-win; ESM safe) ---------- */
+let activeWinGetter = null;   // function or null
+let activeWinTimer = null;
+let lastRealWin = null;       // { app, title, ts }
+
+async function maybeLoadActiveWin() {
+  if (activeWinGetter !== null) return activeWinGetter; // cached
+  try {
+    const mod = await import('active-win');
+    activeWinGetter = typeof mod.default === 'function' ? mod.default : null;
+  } catch {
+    activeWinGetter = null;
+  }
+  return activeWinGetter;
+}
+function isNoiseWindow(info) {
+  const title = (info?.title || '').toLowerCase();
+  const appName = (info?.owner?.name || '').toLowerCase();
+
+  if (appName.includes('snippetstash') || appName.includes('electron')) return true;
+
+  const badTitles = ['snipping tool', 'screen snipping', 'screenclip', 'screenshot', 'capture'];
+  const badApps   = ['snipping tool', 'screen snipping', 'screenclip', 'shell experiences', 'windows input'];
+  if (badTitles.some(x => title.includes(x))) return true;
+  if (badApps.some(x => appName.includes(x))) return true;
+
+  if (!title.trim()) return true;
+
+  return false;
+}
+async function startActiveWinSampling() {
+  const getWin = await maybeLoadActiveWin();
+  if (!getWin) return; // gracefully no-op if not available
+  if (activeWinTimer) clearInterval(activeWinTimer);
+
+  activeWinTimer = setInterval(async () => {
+    try {
+      const info = await getWin();
+      if (info && !isNoiseWindow(info)) {
+        lastRealWin = {
+          app: info.owner?.name || '',
+          title: info.title || '',
+          ts: Date.now(),
+        };
+      }
+    } catch {}
+  }, 800);
+}
+function stopActiveWinSampling() {
+  if (activeWinTimer) clearInterval(activeWinTimer);
+  activeWinTimer = null;
+  lastRealWin = null;
+}
+function pickContextNowSync() {
+  const MAX_AGE = 7000; // ms
+  if (lastRealWin && (Date.now() - lastRealWin.ts) <= MAX_AGE) {
+    return { app: lastRealWin.app, title: lastRealWin.title };
+  }
+  return undefined;
+}
+async function pickContextOnDemand() {
+  const getWin = await maybeLoadActiveWin();
+  if (!getWin) return undefined;
+  try {
+    const info = await getWin();
+    if (info && !isNoiseWindow(info)) {
+      return { app: info.owner?.name || '', title: info.title || '' };
+    }
+  } catch {}
+  return undefined;
+}
 
 /* ---------- Helpers ---------- */
 function userDir(...p) { return path.join(app.getPath('userData'), ...p); }
@@ -110,22 +194,12 @@ function readClipboardImageRobust() {
   return nativeImage.createEmpty();
 }
 
-async function maybeLoadActiveWin() {
-  if (activeWinGetter) return activeWinGetter;
-  try {
-    const mod = await import('active-win');
-    if (typeof mod.default === 'function') activeWinGetter = mod.default;
-  } catch { activeWinGetter = null; }
-  return activeWinGetter;
-}
-
 function sortItems(items) {
   items.sort((a, b) =>
     (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) ||
     new Date(b.ts) - new Date(a.ts)
   );
 }
-
 async function enforceMaxAndCleanup(items) {
   const max = settingsStore.get('maxItems') || 500;
   if (items.length <= max) return;
@@ -173,11 +247,14 @@ function registerHotkey() {
   if (!ok) globalShortcut.register('CommandOrControl+Shift+Space', showOverlay);
 }
 
-/* ---------- Clipboard polling ---------- */
+/* ---------- Clipboard polling (adds context when enabled) ---------- */
+function captureSourceIfEnabled() {
+  if (!settingsStore.get('captureContext')) return undefined;
+  return pickContextNowSync();
+}
 function startClipboardPolling() {
   if (clipboardPollTimer) clearInterval(clipboardPollTimer);
   clipboardPollTimer = setInterval(async () => {
-    // Images
     try {
       const img = readClipboardImageRobust();
       if (img && !img.isEmpty()) {
@@ -186,15 +263,9 @@ function startClipboardPolling() {
         if (hash !== lastImageHash) {
           lastImageHash = hash;
 
-          let source;
-          if (settingsStore.get('captureContext')) {
-            try {
-              const getWin = await maybeLoadActiveWin();
-              if (getWin) {
-                const info = await getWin();
-                if (info) source = { title: info.title, app: info.owner?.name };
-              }
-            } catch {}
+          let source = captureSourceIfEnabled();
+          if (!source && settingsStore.get('captureContext')) {
+            source = await pickContextOnDemand();
           }
 
           const id = Date.now();
@@ -206,7 +277,7 @@ function startClipboardPolling() {
           historyStore.set('items', items);
           overlayWin?.webContents?.send('history:update', items);
 
-          // OCR (Buffer input, dev-safe)
+          // OCR off-thread
           (async () => {
             try {
               const worker = await getOcrWorker();
@@ -214,7 +285,6 @@ function startClipboardPolling() {
               const { data } = await worker.recognize(buf);
               const text = (data?.text || '').trim();
               if (!text) return;
-
               const itemsNow = historyStore.get('items') || [];
               const idx = itemsNow.findIndex(i => i.id === id);
               if (idx >= 0) {
@@ -222,33 +292,22 @@ function startClipboardPolling() {
                 historyStore.set('items', itemsNow);
                 overlayWin?.webContents?.send('history:update', itemsNow);
               }
-            } catch (e) {
-              console.warn('[ocr]', e?.message);
-            }
+            } catch (e) { console.warn('[ocr]', e?.message); }
           })();
 
-          return; // skip text this tick
+          return;
         }
       }
-    } catch (e) {
-      console.warn('[clip] image read error:', e?.message);
-    }
+    } catch (e) { console.warn('[clip] image read error:', e?.message); }
 
-    // Text
     const text = clipboard.readText();
     if (!text || !text.trim()) return;
     if (text === lastClipboardText) return;
     lastClipboardText = text;
 
-    let source;
-    if (settingsStore.get('captureContext')) {
-      try {
-        const getWin = await maybeLoadActiveWin();
-        if (getWin) {
-          const info = await getWin();
-          if (info) source = { title: info.title, app: info.owner?.name };
-        }
-      } catch {}
+    let source = captureSourceIfEnabled();
+    if (!source && settingsStore.get('captureContext')) {
+      source = await pickContextOnDemand();
     }
 
     const items = historyStore.get('items') || [];
@@ -300,22 +359,29 @@ ipcMain.handle('open-url', async (_event, url) => {
 });
 
 ipcMain.handle('settings:get', () => ({
+  theme: settingsStore.get('theme'),
   hotkey: settingsStore.get('hotkey'),
   maxItems: settingsStore.get('maxItems'),
   captureContext: settingsStore.get('captureContext'),
-  theme: settingsStore.get('theme'),
   searchMode: settingsStore.get('searchMode'),
   fuzzyThreshold: settingsStore.get('fuzzyThreshold'),
 }));
-ipcMain.handle('settings:save', (_e, s) => {
+ipcMain.handle('settings:save', async (_e, s) => {
+  settingsStore.set('theme', s.theme === 'light' ? 'light' : 'dark');
   settingsStore.set('hotkey', s.hotkey || 'CommandOrControl+Shift+Space');
   settingsStore.set('maxItems', Math.max(50, Math.min(5000, parseInt(s.maxItems || 500, 10))));
   settingsStore.set('captureContext', !!s.captureContext);
-  settingsStore.set('theme', 'dark');
   settingsStore.set('searchMode', s.searchMode === 'exact' ? 'exact' : 'fuzzy');
-  const th = Number.isFinite(+s.fuzzyThreshold) ? Math.min(0.9, Math.max(0.1, +s.fuzzyThreshold)) : 0.5;
+  const th = Number.isFinite(+s.fuzzyThreshold) ? Math.min(0.9, Math.max(0.1, +s.fuzzyThreshold)) : 0.4;
   settingsStore.set('fuzzyThreshold', th);
+
   registerHotkey();
+
+  if (settingsStore.get('captureContext')) {
+    await startActiveWinSampling();
+  } else {
+    stopActiveWinSampling();
+  }
   return true;
 });
 
@@ -338,6 +404,11 @@ const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
 else {
   app.on('second-instance', () => showOverlay());
-  app.whenReady().then(() => { createOverlay(); registerHotkey(); startClipboardPolling(); });
-  app.on('will-quit', () => { globalShortcut.unregisterAll(); });
+  app.whenReady().then(async () => {
+    createOverlay();
+    registerHotkey();
+    startClipboardPolling();
+    if (settingsStore.get('captureContext')) await startActiveWinSampling();
+  });
+  app.on('will-quit', () => { globalShortcut.unregisterAll(); stopActiveWinSampling(); });
 }
