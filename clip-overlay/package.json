@@ -1,5 +1,5 @@
 {
-  "name": "snippetstash",
+  "name": "ctrlc",
   "version": "0.1.1",
   "main": "main.js",
   "scripts": {
@@ -32,6 +32,7 @@
       "target": [
         "nsis"
       ],
+       "icon": "build/CtrlC-icon-v2.ico",
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "nsis": {
