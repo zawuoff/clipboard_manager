@@ -1,6 +1,5 @@
 // renderer.js
 
-/* ---------- DOM helpers ---------- */
 const $ = (sel) => document.querySelector(sel);
 
 /* Core elements */
@@ -8,7 +7,6 @@ const overlayCard = $('.overlay');
 const resultsEl   = $('#results');
 const searchEl    = $('#search');
 const settingsEl  = $('#settings');
-const themeSelect = $('#themeSelect');         // Theme dropdown in Settings
 const hotkeyEl    = $('#hotkey');
 const maxItemsEl  = $('#maxItems');
 const captureEl   = $('#captureContext');
@@ -16,6 +14,10 @@ const clearBtn    = $('#clearBtn');
 const settingsBtn = $('#settingsBtn');
 const saveBtn     = $('#saveSettings');
 const closeBtn    = $('#closeSettings');
+
+/* Search settings UI */
+const searchModeEl   = $('#searchMode');
+const fuzzyThreshEl  = $('#fuzzyThreshold');
 
 /* Tabs */
 const tabsEl = document.querySelector('.tabs');
@@ -26,22 +28,14 @@ let filtered = [];
 let selectedIndex = 0;
 let currentTab = localStorage.getItem('clip_tab') || 'recent';
 let cfg = {
-  theme: 'dark',                 // keep your existing dark look as default
   hotkey: '',
   maxItems: 500,
   captureContext: false,
   searchMode: 'fuzzy',
-  fuzzyThreshold: 0.5,
+  fuzzyThreshold: 0.4, // a bit looser default works better for subsequence queries
 };
-
-/* ---------- Theme (light-only override) ---------- */
-function applyTheme(theme) {
-  const t = theme === 'light' ? 'light' : 'dark';
-  // Dark = default (no attribute); Light = set attribute to enable light-theme.css overrides only
-  if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
-  else document.documentElement.removeAttribute('data-theme');
-  if (themeSelect) themeSelect.value = t;
-}
+let lastQuery = '';
+let lastMode  = 'fuzzy';
 
 /* ---------- Utils ---------- */
 function escapeHTML(s='') {
@@ -56,11 +50,78 @@ function extractUrlFromText(text = "") {
   const m = String(text).match(URL_RE);
   if (!m) return null;
   let url = m[0];
-  url = url.replace(/[)\]\}>,.;!?]+$/g, ''); // trim trailing punctuation
+  url = url.replace(/[)\]\}>,.;!?]+$/g, '');
   return url;
 }
 function isUrlItem(it) {
   return it.type === 'text' && URL_RE.test(String(it.text || ''));
+}
+
+/* ---------- Fuzzy matching (better ranking) ----------
+   - If substring: strong score biased to earlier starts.
+   - Else subsequence: uses span density (qlen/span), start bonus, gap penalty.
+   Returns { score: 0..1, pos: Set<int> } where pos are indices to highlight.
+------------------------------------------------------ */
+function fuzzyMatch(hayRaw = '', qRaw = '') {
+  const hay = String(hayRaw);
+  const q   = String(qRaw);
+  if (!q) return { score: 1, pos: new Set() };
+
+  const hayL = hay.toLowerCase();
+  const qL   = q.toLowerCase();
+  const len  = hayL.length;
+  const qlen = qL.length;
+
+  // Substring first (contiguous)
+  const idx = hayL.indexOf(qL);
+  if (idx >= 0) {
+    const pos = new Set();
+    for (let i = idx; i < idx + qlen && i < len; i++) pos.add(i);
+
+    // Earlier & tighter substrings are better
+    const startBonus = 1 - (idx / Math.max(1, len));           // 0..1 (earlier is better)
+    const tightBonus = Math.min(1, qlen / Math.max(qlen, 12));  // short queries don't over-dominate
+    const score = Math.min(1, 0.65 + 0.25*startBonus + 0.10*tightBonus);
+    return { score, pos };
+  }
+
+  // Greedy subsequence
+  let i = 0, j = 0, first = -1, last = -1;
+  const pos = new Set();
+  while (i < len && j < qlen) {
+    if (hayL[i] === qL[j]) {
+      if (first < 0) first = i;
+      last = i;
+      pos.add(i);
+      j++;
+    }
+    i++;
+  }
+  if (j < qlen) return { score: 0, pos: new Set() }; // not all letters found in order
+
+  const span = (last - first + 1);               // window covering the match
+  const density = qlen / span;                   // 0..1 (1 = contiguous)
+  const startBonus = 1 - (first / Math.max(1, len)); // earlier appears better
+  const gapPenalty = (span - qlen) / span;       // 0..1 (0 best)
+
+  // Blend: dense span matters most; earlier start helps; fewer gaps helps.
+  const score = Math.max(0, Math.min(1, 0.6*density + 0.3*startBonus + 0.1*(1-gapPenalty)));
+  return { score, pos };
+}
+
+/* Render helper for highlights */
+function renderWithHighlights(text = '', posSet = new Set()) {
+  if (!posSet || !posSet.size) return escapeHTML(text);
+  let html = '';
+  let inRun = false;
+  for (let i = 0; i < text.length; i++) {
+    const isHit = posSet.has(i);
+    if (isHit && !inRun) { html += '<span class="hl">'; inRun = true; }
+    if (!isHit && inRun) { html += '</span>'; inRun = false; }
+    html += escapeHTML(text[i]);
+  }
+  if (inRun) html += '</span>';
+  return html;
 }
 
 /* ---------- Sorting & rendering ---------- */
@@ -70,9 +131,26 @@ function sortCombined(arr) {
     new Date(b.ts) - new Date(a.ts)
   );
 }
+function sortByScoreThenDefault(arr) {
+  arr.sort((a, b) =>
+    (b._score || 0) - (a._score || 0) ||
+    (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) ||
+    new Date(b.ts) - new Date(a.ts)
+  );
+}
+
+function baseSearchTextForItem(it) {
+  if (it.type !== 'image') return String(it.text || '');
+  const dims = it.wh ? `${it.wh.w}x${it.wh.h}` : '';
+  const meta = `${dims} ${it?.source?.app || ''} ${it?.source?.title || ''}`;
+  return (it.ocrText && it.ocrText.trim()) ? it.ocrText : meta;
+}
 
 function render(list = []) {
   resultsEl.innerHTML = '';
+  const q = lastQuery;
+  const mode = lastMode;
+
   list.forEach((it) => {
     const li = document.createElement('li');
     li.className = 'row';
@@ -81,17 +159,24 @@ function render(list = []) {
     if (it.type === 'image') {
       const dims = it.wh ? ` (${it.wh.w}×${it.wh.h})` : '';
       const ctx = it.source ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}` : '';
-      const ocrPreview = (it.ocrText || '').trim();
-      const ocrLine = ocrPreview
-        ? `<div class="ocr-preview">${escapeHTML(ocrPreview.slice(0, 120))}${ocrPreview.length>120?'…':''}</div>`
+
+      const ocrFull = (it.ocrText || '').trim();
+      const ocrPreview = ocrFull ? ocrFull.slice(0, 120) : '';
+      const pos = q && ocrPreview
+        ? (mode === 'fuzzy' ? fuzzyMatch(ocrPreview, q).pos
+                             : fuzzyMatch(ocrPreview, q).pos)
+        : new Set();
+      const ocrHTML = ocrPreview
+        ? `<div class="ocr-preview">${renderWithHighlights(ocrPreview, pos)}${ocrFull.length>120?'…':''}</div>`
         : '';
+
       li.innerHTML = `
         <div class="thumbwrap">
           <img class="thumb" src="${it.thumb}" alt="Clipboard image${dims}" />
         </div>
         <div class="cell">
           <div class="primary">Image${dims}</div>
-          ${ocrLine}
+          ${ocrHTML}
           <div class="meta">
             ${new Date(it.ts || Date.now()).toLocaleString()}${ctx}
             <button class="pin-btn" data-id="${it.id}" title="${it.pinned ? 'Unpin' : 'Pin'}">${it.pinned ? '⭐' : '☆'}</button>
@@ -101,12 +186,15 @@ function render(list = []) {
       `;
     } else {
       const ctx = it.source ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}` : '';
-      const primary = escapeHTML(trimOneLine(it.text || ''));
+      const rawPrimary = trimOneLine(it.text || '');
+      const pos = q ? fuzzyMatch(rawPrimary, q).pos : new Set();
+      const primaryHTML = renderWithHighlights(rawPrimary, pos);
+
       const openBtnHTML = isUrlItem(it)
         ? `<button class="open-btn" data-id="${it.id}" title="Open in browser">↗</button>`
         : '';
       li.innerHTML = `
-        <div class="primary">${primary}</div>
+        <div class="primary">${primaryHTML}</div>
         <div class="meta">
           ${new Date(it.ts || Date.now()).toLocaleString()}${ctx}
           <button class="pin-btn" data-id="${it.id}" title="${it.pinned ? 'Unpin' : 'Pin'}">${it.pinned ? '⭐' : '☆'}</button>
@@ -130,11 +218,13 @@ function updateTabsUI() {
   });
 }
 
-/* ---------- Filtering & search (includes OCR) ---------- */
+/* ---------- Filtering & search ---------- */
 function applyFilter() {
-  const q = (searchEl.value || '').trim().toLowerCase();
-  let scope = items.slice();
+  const q = (searchEl.value || '').trim();
+  lastQuery = q;
+  lastMode  = (searchModeEl?.value || cfg.searchMode || 'fuzzy');
 
+  let scope = items.slice();
   if (currentTab === 'images') scope = scope.filter(i => i.type === 'image');
   if (currentTab === 'urls')   scope = scope.filter(i => i.type !== 'image' && isUrlItem(i));
   if (currentTab === 'pinned') scope = scope.filter(i => !!i.pinned);
@@ -147,20 +237,22 @@ function applyFilter() {
     return render(filtered);
   }
 
-  const texts = scope.filter(i => i.type !== 'image');
-  const imgs  = scope.filter(i => i.type === 'image');
+  if (lastMode === 'fuzzy') {
+    const thresh = Number(fuzzyThreshEl?.value || cfg.fuzzyThreshold || 0.4);
+    const matches = [];
+    for (const it of scope) {
+      // score on the "search text" (full text or OCR/meta)
+      const s = fuzzyMatch(baseSearchTextForItem(it), q).score;
+      if (s >= thresh) matches.push({ ...it, _score: s });
+    }
+    sortByScoreThenDefault(matches);
+    filtered = matches;
+  } else {
+    const qlc = q.toLowerCase();
+    filtered = scope.filter(it => String(baseSearchTextForItem(it)).toLowerCase().includes(qlc));
+    sortCombined(filtered);
+  }
 
-  const textResults = texts.filter(it => String(it.text || '').toLowerCase().includes(q));
-  const ocrHits = imgs.filter(it => (it.ocrText || '').toLowerCase().includes(q));
-  const metaHits = imgs.filter(it => {
-    if (it.ocrText) return false; // already matched
-    const dims = it.wh ? `${it.wh.w}x${it.wh.h}` : '';
-    const hay = `${dims} ${it?.source?.app || ''} ${it?.source?.title || ''}`.toLowerCase();
-    return hay.includes(q);
-  });
-
-  filtered = [...textResults, ...ocrHits, ...metaHits];
-  sortCombined(filtered);
   selectedIndex = 0;
   updateTabsUI();
   render(filtered);
@@ -190,18 +282,10 @@ function chooseByRow(row) {
 
 /* ---------- Keyboard ---------- */
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') {
-    window.api.hideOverlay();
-    e.preventDefault();
-    return;
-  }
-  if (e.key === 'ArrowDown') {
-    setSelected(selectedIndex + 1);
-    e.preventDefault();
-  } else if (e.key === 'ArrowUp') {
-    setSelected(selectedIndex - 1);
-    e.preventDefault();
-  } else if (e.key === 'Enter') {
+  if (e.key === 'Escape') { window.api.hideOverlay(); e.preventDefault(); return; }
+  if (e.key === 'ArrowDown') { setSelected(selectedIndex + 1); e.preventDefault(); }
+  else if (e.key === 'ArrowUp') { setSelected(selectedIndex - 1); e.preventDefault(); }
+  else if (e.key === 'Enter') {
     const row = resultsEl.children[selectedIndex];
     if (row) chooseByRow(row);
   }
@@ -271,20 +355,20 @@ async function boot() {
   items = await window.api.getHistory().catch(() => []);
   try {
     const s = await window.api.getSettings();
-    cfg.theme = (s.theme === 'light') ? 'light' : 'dark';   // default to dark if unset
     cfg.hotkey = s.hotkey;
     cfg.maxItems = s.maxItems;
     cfg.captureContext = !!s.captureContext;
     cfg.searchMode = s.searchMode || 'fuzzy';
-    cfg.fuzzyThreshold = typeof s.fuzzyThreshold === 'number' ? s.fuzzyThreshold : 0.5;
+    cfg.fuzzyThreshold = typeof s.fuzzyThreshold === 'number' ? s.fuzzyThreshold : 0.4;
 
-    if (themeSelect) themeSelect.value = cfg.theme;
     if (hotkeyEl) hotkeyEl.value = cfg.hotkey || '';
     if (maxItemsEl) maxItemsEl.value = cfg.maxItems || 500;
     if (captureEl) captureEl.checked = !!cfg.captureContext;
+
+    if (searchModeEl)  searchModeEl.value  = cfg.searchMode;
+    if (fuzzyThreshEl) fuzzyThreshEl.value = String(cfg.fuzzyThreshold);
   } catch {}
 
-  applyTheme(cfg.theme);
   filtered = items.slice();
   updateTabsUI();
   render(filtered);
@@ -293,22 +377,6 @@ async function boot() {
 
 window.addEventListener('DOMContentLoaded', async () => {
   await boot();
-
-  // Theme dropdown in Settings
-  themeSelect?.addEventListener('change', async () => {
-    cfg.theme = themeSelect.value === 'light' ? 'light' : 'dark';
-    applyTheme(cfg.theme);
-    try {
-      await window.api.saveSettings({
-        theme: cfg.theme,
-        hotkey: cfg.hotkey,
-        maxItems: cfg.maxItems,
-        captureContext: cfg.captureContext,
-        searchMode: cfg.searchMode,
-        fuzzyThreshold: cfg.fuzzyThreshold,
-      });
-    } catch {}
-  });
 
   window.api.onHistoryUpdate((list) => {
     items = list || [];
@@ -326,30 +394,27 @@ window.addEventListener('DOMContentLoaded', async () => {
 });
 
 /* ---------- Settings ---------- */
-clearBtn.onclick = async () => {
+clearBtn?.addEventListener('click', async () => {
   await window.api.clearHistory();
   items = [];
   applyFilter();
-};
-
-settingsBtn.onclick = () => {
+});
+settingsBtn?.addEventListener('click', () => {
   settingsEl?.classList.add('open');
   settingsEl?.querySelector('input,select,button,textarea')?.focus();
-};
+});
+closeBtn?.addEventListener('click', () => settingsEl?.classList.remove('open'));
 
-closeBtn.onclick = () => settingsEl?.classList.remove('open');
-
-saveBtn.onclick = async () => {
+saveBtn?.addEventListener('click', async () => {
   const payload = {
-    theme: (themeSelect?.value || cfg.theme),
     hotkey: hotkeyEl?.value || cfg.hotkey || '',
     maxItems: Number(maxItemsEl?.value || cfg.maxItems || 500),
     captureContext: !!(captureEl?.checked ?? cfg.captureContext),
-    searchMode: cfg.searchMode,
-    fuzzyThreshold: cfg.fuzzyThreshold,
+    searchMode: (searchModeEl?.value || cfg.searchMode),
+    fuzzyThreshold: Number(fuzzyThreshEl?.value || cfg.fuzzyThreshold || 0.4),
   };
   cfg = { ...cfg, ...payload };
   try { await window.api.saveSettings(payload); } catch {}
   settingsEl?.classList.remove('open');
-  applyTheme(cfg.theme);
-};
+  applyFilter();
+});

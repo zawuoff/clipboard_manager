@@ -5,13 +5,10 @@
   <meta http-equiv="Content-Security-Policy"
         content="default-src 'self'; script-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'">
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Clipboard Overlay</title>
+  <title>SnippetStash</title>
 
-  <!-- Keep your existing styles first (dark theme remains default) -->
+  <!-- Dark/base styles only -->
   <link rel="stylesheet" href="styles.css" />
-  <!-- Light theme overrides only trigger when data-theme="light" -->
-  <link rel="stylesheet" href="light-theme.css" />
-
   <script defer src="renderer.js"></script>
 </head>
 <body>
@@ -37,16 +34,9 @@
 
     <ul id="results" class="results" role="listbox" aria-label="Clipboard items"></ul>
 
-    <!-- Settings sheet (adds only a Theme dropdown, rest unchanged) -->
+    <!-- Settings sheet -->
     <section id="settings" class="sheet" aria-label="Settings" tabindex="-1">
       <h2>Settings</h2>
-
-      <label>Theme
-        <select id="themeSelect">
-          <option value="dark">Dark (default)</option>
-          <option value="light">Light</option>
-        </select>
-      </label>
 
       <label>Hotkey
         <input id="hotkey" type="text" readonly placeholder="Ctrl+Shift+Space" />
@@ -59,6 +49,21 @@
       <label class="rowline">
         <input id="captureContext" type="checkbox" />
         Capture app/window context
+      </label>
+
+      <!-- Search options -->
+      <div class="divider"></div>
+      <h3>Search</h3>
+
+      <label>Mode
+        <select id="searchMode">
+          <option value="fuzzy">Fuzzy (recommended)</option>
+          <option value="exact">Exact</option>
+        </select>
+      </label>
+
+      <label>Fuzzy threshold (0.10–0.90)
+        <input id="fuzzyThreshold" type="number" min="0.10" max="0.90" step="0.05" />
       </label>
 
       <div class="actions">

@@ -23,10 +23,15 @@
       "buildResources": "build"
     },
     "extraResources": [
-      { "from": "node_modules/@tesseract.js-data/eng", "to": "tessdata/eng" }
+      {
+        "from": "node_modules/@tesseract.js-data/eng",
+        "to": "tessdata/eng"
+      }
     ],
     "win": {
-      "target": [ "nsis" ],
+      "target": [
+        "nsis"
+      ],
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "nsis": {
@@ -34,5 +39,16 @@
       "allowToChangeInstallationDirectory": true,
       "perMachine": false
     }
+  },
+  
+  "dependencies": {
+  "electron-store": "^8.1.0",
+  "tesseract.js": "^6.0.0",
+  "@tesseract.js-data/eng": "^5.0.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1"
   }
+
 }
