@@ -1,90 +1,163 @@
-/* Light theme: high-contrast color overrides ONLY.
-   Dark stays exactly as your base styles.css. */
-
-html[data-theme="light"] body { background:#F8FAFC; color:#0B1220; }
-
-/* Overlay & toolbar */
-html[data-theme="light"] .overlay{ background:rgba(255,255,255,0.98) !important; border-color:#E5E7EB !important; }
-html[data-theme="light"] .toolbar{ border-color:#E5E7EB !important; }
-html[data-theme="light"] .toolbar input#search{
-  background:#F3F4F6 !important; color:#0B1220 !important; border-color:#E5E7EB !important;
-}
-html[data-theme="light"] .toolbar input#search::placeholder{ color:#6B7280 !important; }
-
-/* Tabs — improved readability */
-html[data-theme="light"] .tabs{ border-color:#E5E7EB !important; }
-html[data-theme="light"] .tabs .tab{
-  color:#0B1220 !important;           /* inactive: near-black for strong contrast */
-  border-color:transparent !important;
-}
-html[data-theme="light"] .tabs .tab:hover{
-  background:#F3F4F6 !important;      /* subtle hover bg for inactive tabs */
-}
-html[data-theme="light"] .tabs .tab.active{
-  background:#EAF0FF !important;      /* selected */
-  color:#3F3DE0 !important;
-  border-color:#E5E7EB !important;
+/* All overrides are scoped so the dark theme remains 100% unchanged. */
+html[data-theme="light"] body {
+  background: #F8FAFC; /* slate-50 */
+  color: #0B1220;      /* near-black for readability */
 }
 
-/* Results / rows */
-html[data-theme="light"] .results{ color:#0B1220 !important; }
-html[data-theme="light"] .row:hover{ background:#F3F4F6 !important; }
-html[data-theme="light"] .row.selected{ background:#EAF0FF !important; outline-color:#A5B4FC !important; }
-html[data-theme="light"] .thumbwrap{ background:#F3F4F6 !important; border-color:#E5E7EB !important; }
-html[data-theme="light"] .cell .primary{ color:#0B1220 !important; }
-html[data-theme="light"] .cell .meta{ color:#475569 !important; }
-html[data-theme="light"] .ocr-preview{ color:#6B7280 !important; }
-
-/* Buttons */
-html[data-theme="light"] button{ background:#4F46E5 !important; color:#FFFFFF !important; }
-html[data-theme="light"] button:hover{ background:#4338CA !important; }
-html[data-theme="light"] button.ghost{ background:transparent !important; color:#0B1220 !important; border:1px solid #E5E7EB !important; }
-html[data-theme="light"] button.ghost:hover{ background:#F3F4F6 !important; }
-
-/* SETTINGS SHEET — force light */
-html[data-theme="light"] .overlay .sheet{
-  background:#FFFFFF !important; border-color:#E5E7EB !important; color:#0B1220 !important;
-}
-html[data-theme="light"] .overlay .sheet h2{ color:#0B1220 !important; }
-html[data-theme="light"] .overlay .sheet label,
-html[data-theme="light"] .overlay .sheet .rowline{ color:#0B1220 !important; }
-
-html[data-theme="light"] .overlay .sheet input,
-html[data-theme="light"] .overlay .sheet select{
-  background:#F9FAFB !important; color:#0B1220 !important; border:1px solid #E5E7EB !important;
-}
-html[data-theme="light"] .overlay .sheet input::placeholder{ color:#6B7280 !important; }
-
-html[data-theme="light"] .overlay .sheet .actions button.ghost{
-  background:transparent !important; color:#0B1220 !important; border:1px solid #E5E7EB !important;
-}
-html[data-theme="light"] .overlay .sheet .actions button.ghost:hover{ background:#F3F4F6 !important; }
-
-/* Scrollbar */
-html[data-theme="light"] .results::-webkit-scrollbar-thumb{ background:#E5E7EB !important; }
-
-
-/* --- Fix unreadable content in Light --- */
-html[data-theme="light"] .results { color:#0B1220 !important; }
-
-/* Some bases dim non-selected rows via opacity — cancel that */
-html[data-theme="light"] .row { opacity: 1 !important; }
-
-/* Ensure primary line and links are full-contrast */
-html[data-theme="light"] .row .primary,
-html[data-theme="light"] .row .primary a {
-  color:#0B1220 !important;
+/* Overlay card & toolbar */
+html[data-theme="light"] .overlay {
+  background: rgba(255,255,255,0.92);
+  backdrop-filter: saturate(140%) blur(6px);
+  border: 1px solid #E5E7EB; /* gray-200 */
+  box-shadow: 0 10px 30px rgba(2,6,23,0.10);
 }
 
-/* Timestamps / app names */
-html[data-theme="light"] .row .meta { color:#475569 !important; }
+html[data-theme="light"] .toolbar input#search {
+  background: #EEF2FF;           /* indigo-50 */
+  color: #0B1220;
+  border: 1px solid #C7D2FE;     /* indigo-200 */
+}
+html[data-theme="light"] .toolbar input#search::placeholder { color: #64748B; } /* slate-500 */
 
-/* Selected row still readable on its blue background */
-html[data-theme="light"] .row.selected .primary,
-html[data-theme="light"] .row.selected .primary a {
-  color:#0B1220 !important;
+html[data-theme="light"] .toolbar button {
+  background: #4F46E5;  /* indigo-600 */
+  color: #fff;
+  border: none;
+}
+html[data-theme="light"] .toolbar button:hover { filter: brightness(1.05); }
+
+/* Tabs */
+html[data-theme="light"] .tabs .tab {
+  background: #E0E7FF;  /* indigo-100 */
+  color: #1E1B4B;       /* indigo-950 */
+  border: 1px solid #C7D2FE;
+}
+html[data-theme="light"] .tabs .tab.active {
+  background: #4F46E5;  /* indigo-600 */
+  color: #fff;
+  border-color: #4F46E5;
 }
 
-/* (Optional) make non-selected link URLs not purple/blue if your base styles set them */
-html[data-theme="light"] .results a { color:#0B1220 !important; text-decoration:none; }
-html[data-theme="light"] .row:hover .primary a { text-decoration:underline; }
+/* List rows */
+html[data-theme="light"] .results .row {
+  background: #F3F4F6;          /* gray-100 */
+  border: 1px solid #E5E7EB;    /* gray-200 */
+  color: #0B1220;
+}
+html[data-theme="light"] .results .row .primary { color: #0B1220; }
+html[data-theme="light"] .results .row .meta { color: #475569; }     /* slate-600 */
+
+html[data-theme="light"] .results .row.selected {
+  background: #E0EAFF;          /* indigo-100/200 blend */
+  border-color: #A5B4FC;        /* indigo-300 */
+}
+
+/* Buttons inside items */
+html[data-theme="light"] .results .row .meta button {
+  background: #E0E7FF;
+  color: #1E1B4B;
+  border: 1px solid #C7D2FE;
+}
+html[data-theme="light"] .results .row .meta button:hover {
+  filter: brightness(0.98);
+}
+
+/* OCR preview text */
+html[data-theme="light"] .ocr-preview { color: #334155; } /* slate-700 */
+
+/* Settings sheet */
+html[data-theme="light"] .sheet {
+  background: #FFFFFF;
+  color: #0B1220;
+  border: 1px solid #E5E7EB;
+  box-shadow: 0 16px 40px rgba(2,6,23,0.16);
+}
+html[data-theme="light"] .sheet h2,
+html[data-theme="light"] .sheet h3 { color: #0B1220; }
+
+html[data-theme="light"] .sheet input[type="text"],
+html[data-theme="light"] .sheet input[type="number"],
+html[data-theme="light"] .sheet select {
+  background: #F8FAFC;     /* slate-50 */
+  color: #0B1220;
+  border: 1px solid #E2E8F0; /* slate-200 */
+}
+html[data-theme="light"] .sheet input::placeholder { color: #64748B; }
+
+html[data-theme="light"] .sheet .actions button {
+  background: #4F46E5;  /* indigo-600 */
+  color: #fff;
+  border: none;
+}
+html[data-theme="light"] .sheet .actions .ghost {
+  background: #E2E8F0;  /* slate-200 */
+  color: #0B1220;
+  border: none;
+}
+
+/* Search highlight */
+html[data-theme="light"] .hl {
+  background: rgba(79, 70, 229, 0.22); /* indigo-600 @ 22% */
+  border-radius: 3px;
+  padding: 0 1px;
+}
+
+/* Scrollbar (optional, subtle) */
+html[data-theme="light"] *::-webkit-scrollbar {
+  width: 10px; height: 10px;
+}
+html[data-theme="light"] *::-webkit-scrollbar-thumb {
+  background: #CBD5E1;  /* slate-300 */
+  border-radius: 6px;
+}
+html[data-theme="light"] *::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;  /* slate-400 */
+}
+
+/* --- SETTINGS SHEET OVERRIDES (light) --- */
+html[data-theme="light"] .overlay #settings,
+html[data-theme="light"] .overlay .sheet {
+  background: #FFFFFF !important;
+  color: #0B1220 !important;
+  border: 1px solid #E5E7EB;
+  box-shadow: 0 16px 40px rgba(2,6,23,0.16);
+}
+
+/* Headings */
+html[data-theme="light"] #settings h2,
+html[data-theme="light"] #settings h3 {
+  color: #0B1220 !important;
+}
+
+/* Inputs & selects inside settings */
+html[data-theme="light"] #settings input[type="text"],
+html[data-theme="light"] #settings input[type="number"],
+html[data-theme="light"] #settings select {
+  background: #F8FAFC !important;   /* slate-50 */
+  color: #0B1220 !important;
+  border: 1px solid #E2E8F0 !important; /* slate-200 */
+}
+html[data-theme="light"] #settings input::placeholder {
+  color: #64748B !important; /* slate-500 */
+}
+
+/* Checkbox accent */
+html[data-theme="light"] #settings input[type="checkbox"] {
+  accent-color: #4F46E5; /* indigo-600 */
+}
+
+/* Buttons in settings */
+html[data-theme="light"] #settings .actions button {
+  background: #4F46E5 !important;  /* indigo-600 */
+  color: #ffffff !important;
+  border: none !important;
+}
+html[data-theme="light"] #settings .actions .ghost {
+  background: #E2E8F0 !important;  /* slate-200 */
+  color: #0B1220 !important;
+  border: none !important;
+}
+
+/* Divider and subtle text in settings */
+html[data-theme="light"] #settings .divider { background: #E5E7EB !important; }
+html[data-theme="light"] #settings .rowline { color: #334155 !important; } /* slate-700 */

@@ -7,8 +7,11 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>SnippetStash</title>
 
-  <!-- Dark/base styles only -->
+  <!-- Base (dark) styles -->
   <link rel="stylesheet" href="styles.css" />
+  <!-- Light theme overrides (scoped to html[data-theme="light"]) -->
+  <link rel="stylesheet" href="light-theme.css" />
+
   <script defer src="renderer.js"></script>
 </head>
 <body>
@@ -39,6 +42,14 @@
       <h2>Settings</h2>
 
       <label class="stack">
+        <span>Theme</span>
+        <select id="theme">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+        </select>
+      </label>
+
+      <label class="stack">
         <span>Hotkey</span>
         <input
           id="hotkey"
@@ -50,28 +61,29 @@
         />
       </label>
 
-
-      <label>Max items
+      <label class="stack">
+        <span>Max items</span>
         <input id="maxItems" type="number" min="50" max="5000" step="50" />
       </label>
 
       <label class="rowline">
         <input id="captureContext" type="checkbox" />
-        Capture app/window context
+        <span>Capture app/window context</span>
       </label>
 
-      <!-- Search options -->
       <div class="divider"></div>
       <h3>Search</h3>
 
-      <label>Mode
+      <label class="stack">
+        <span>Mode</span>
         <select id="searchMode">
           <option value="fuzzy">Fuzzy (recommended)</option>
           <option value="exact">Exact</option>
         </select>
       </label>
 
-      <label>Fuzzy threshold (0.10–0.90)
+      <label class="stack">
+        <span>Fuzzy threshold (0.10–0.90)</span>
         <input id="fuzzyThreshold" type="number" min="0.10" max="0.90" step="0.05" />
       </label>
 

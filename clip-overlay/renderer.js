@@ -19,6 +19,9 @@ const closeBtn    = $('#closeSettings');
 const searchModeEl   = $('#searchMode');
 const fuzzyThreshEl  = $('#fuzzyThreshold');
 
+/* Theme setting UI */
+const themeEl = $('#theme');
+
 /* Tabs */
 const tabsEl = document.querySelector('.tabs');
 
@@ -28,6 +31,7 @@ let filtered = [];
 let selectedIndex = 0;
 let currentTab = localStorage.getItem('clip_tab') || 'recent';
 let cfg = {
+  theme: 'dark',
   hotkey: 'CommandOrControl+Shift+Space',
   maxItems: 500,
   captureContext: false,
@@ -253,12 +257,10 @@ function setSelected(i) {
     if (idx === selectedIndex) el.scrollIntoView({ block: 'nearest' });
   });
 }
-
 function chooseByRow(row) {
   const id = Number(row.dataset.id);
   const it = filtered.find(i => i.id === id);
   if (!it) return;
-
   if (it.type === 'image') {
     window.api.setClipboard({ imagePath: it.filePath, imageDataUrl: it.thumb });
   } else {
@@ -337,98 +339,77 @@ document.addEventListener('mousedown', (e) => {
   if (!e.target.closest('.overlay')) window.api.hideOverlay();
 });
 
-/* ---------- Hotkey capture (nice UX) ---------- */
+/* ---------- Hotkey capture ---------- */
 function keyToElectronKey(e) {
-  // Letters
   if (/^[a-zA-Z]$/.test(e.key)) return e.key.toUpperCase();
-  // Digits
   if (/^[0-9]$/.test(e.key)) return e.key;
-  // Function keys
   if (/^F[1-9][0-9]?$/.test(e.key)) return e.key;
-
-  // Specials
   const map = {
     ' ': 'Space', 'Spacebar': 'Space',
     'Escape': 'Escape', 'Esc': 'Escape',
     'Enter': 'Enter', 'Return': 'Enter',
-    'Tab': 'Tab',
-    'Backspace': 'Backspace',
-    'Delete': 'Delete',
-    'Insert': 'Insert',
-    'Home': 'Home',
-    'End': 'End',
-    'PageUp': 'PageUp',
-    'PageDown': 'PageDown',
-    'ArrowUp': 'Up',
-    'ArrowDown': 'Down',
-    'ArrowLeft': 'Left',
-    'ArrowRight': 'Right',
-    '`': '`', '-': '-', '=': '=', '[': '[', ']': ']', '\\': '\\',
-    ';': ';', "'": "'", ',': ',', '.': '.', '/': '/',
+    'Tab': 'Tab','Backspace': 'Backspace','Delete': 'Delete','Insert': 'Insert',
+    'Home': 'Home','End': 'End','PageUp': 'PageUp','PageDown': 'PageDown',
+    'ArrowUp': 'Up','ArrowDown': 'Down','ArrowLeft': 'Left','ArrowRight': 'Right',
+    '`': '`','-':'-','=':'=','[':'[',']':']','\\':'\\',';':';',"'":"'",',':',','.':'.','/':'/'
   };
   return map[e.key] || null;
 }
 function eventToAccelerator(e) {
-  // Let Tab move focus, and allow Esc to cancel
   if (e.key === 'Tab') return null;
   if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
-    // Require at least one modifier to avoid simple keys
     if (e.key !== 'Escape') return null;
   }
   const parts = [];
-  // Prefer 'CommandOrControl' if either is down (cross-platform friendliness)
-  if (e.ctrlKey && e.metaKey) { parts.push('Super', 'Ctrl'); }
-  else if (e.ctrlKey) { parts.push('Ctrl'); }
-  else if (e.metaKey) { parts.push('Super'); }
+  if (e.ctrlKey && e.metaKey) { parts.push('Super','Ctrl'); }
+  else if (e.ctrlKey) parts.push('Ctrl'); else if (e.metaKey) parts.push('Super');
   if (e.altKey) parts.push('Alt');
   if (e.shiftKey) parts.push('Shift');
-
   const key = keyToElectronKey(e);
   if (!key) return null;
-  // Avoid using only a modifier as the key itself
   const modNames = ['Control','Ctrl','Alt','Shift','Super','Meta','Command','CommandOrControl','CmdOrCtrl'];
   if (modNames.includes(key)) return null;
-
   parts.push(key);
   return parts.join('+');
 }
-// Show a friendlier label (optional)
 function displayLabel(accel) {
-  return accel
-    .replace(/CommandOrControl/gi, 'Ctrl/⌘')
-    .replace(/\bCtrl\b/gi, 'Ctrl')
-    .replace(/\bSuper\b/gi, 'Win/⌘');
+  return accel.replace(/CommandOrControl/gi,'Ctrl/⌘').replace(/\bSuper\b/gi,'Win/⌘');
 }
-
-hotkeyEl?.setAttribute('placeholder', 'Click, then press a shortcut (e.g. Ctrl+Shift+Space)');
+hotkeyEl?.setAttribute('placeholder','Click, then press shortcut (e.g. Ctrl+Shift+Space)');
 hotkeyEl?.addEventListener('focus', () => hotkeyEl.select());
 hotkeyEl?.addEventListener('keydown', (e) => {
-  // Capture the combo
   const accel = eventToAccelerator(e);
   if (accel) {
     e.preventDefault();
     hotkeyEl.dataset.accelValue = accel;
     hotkeyEl.value = displayLabel(accel);
-  } else {
-    // Allow Esc to clear (optional)
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      delete hotkeyEl.dataset.accelValue;
-      hotkeyEl.value = '';
-    }
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    delete hotkeyEl.dataset.accelValue;
+    hotkeyEl.value = '';
   }
 });
+
+/* ---------- Theme ---------- */
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
+}
+themeEl?.addEventListener('change', () => applyTheme(themeEl.value));
 
 /* ---------- Boot ---------- */
 async function boot() {
   items = await window.api.getHistory().catch(() => []);
   try {
     const s = await window.api.getSettings();
+    cfg.theme = s.theme || cfg.theme;
     cfg.hotkey = s.hotkey || cfg.hotkey;
     cfg.maxItems = s.maxItems ?? cfg.maxItems;
     cfg.captureContext = !!s.captureContext;
     cfg.searchMode = s.searchMode || cfg.searchMode;
     cfg.fuzzyThreshold = typeof s.fuzzyThreshold === 'number' ? s.fuzzyThreshold : cfg.fuzzyThreshold;
+
+    if (themeEl) themeEl.value = cfg.theme;
+    applyTheme(cfg.theme);
 
     if (hotkeyEl) {
       hotkeyEl.dataset.accelValue = cfg.hotkey;
@@ -457,6 +438,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   window.api.onOverlayShow(() => {
     window.api.getHistory().then(h => { items = h || []; applyFilter(); });
     updateTabsUI();
+    applyTheme(themeEl?.value || cfg.theme);
     searchEl.focus();
     searchEl.select();
   });
@@ -479,6 +461,7 @@ closeBtn?.addEventListener('click', () => settingsEl?.classList.remove('open'));
 saveBtn?.addEventListener('click', async () => {
   const pickedHotkey = hotkeyEl?.dataset.accelValue || cfg.hotkey;
   const payload = {
+    theme: (themeEl?.value || cfg.theme),
     hotkey: pickedHotkey,
     maxItems: Number(maxItemsEl?.value || cfg.maxItems || 500),
     captureContext: !!(captureEl?.checked ?? cfg.captureContext),
@@ -488,5 +471,6 @@ saveBtn?.addEventListener('click', async () => {
   cfg = { ...cfg, ...payload };
   try { await window.api.saveSettings(payload); } catch {}
   settingsEl?.classList.remove('open');
-  applyFilter(); // refresh with new search mode/threshold
+  applyTheme(cfg.theme);
+  applyFilter();
 });
