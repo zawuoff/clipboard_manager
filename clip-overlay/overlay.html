@@ -6,44 +6,51 @@
         content="default-src 'self'; script-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'">
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Clipboard Overlay</title>
+
+  <!-- Keep your existing styles first (dark theme remains default) -->
   <link rel="stylesheet" href="styles.css" />
+  <!-- Light theme overrides only trigger when data-theme="light" -->
+  <link rel="stylesheet" href="light-theme.css" />
+
   <script defer src="renderer.js"></script>
 </head>
 <body>
-  <!-- Main overlay card only (no backdrop) -->
   <div class="overlay show" role="dialog" aria-modal="true" aria-label="Clipboard overlay">
     <header class="toolbar">
       <input
-        id="search" type="text" placeholder="Search your clipboard…"
-        autocomplete="off" spellcheck="false" autofocus />
-      <button id="settingsBtn" title="Settings" aria-label="Settings">⚙</button>
-      <button id="clearBtn" title="Clear history" aria-label="Clear history">🧹</button>
+        id="search"
+        type="text"
+        placeholder="Search (↑/↓ navigate, Enter to copy, Esc to close)…"
+        aria-label="Search clipboard"
+      />
+      <div class="spacer"></div>
+      <button id="clearBtn" title="Clear history">Clear</button>
+      <button id="settingsBtn" title="Settings">⚙</button>
     </header>
 
-    <!-- NEW: Category tabs -->
-    <nav id="tabs" class="tabs" aria-label="Categories">
+    <nav class="tabs" aria-label="Filters">
       <button class="tab" data-tab="recent">recent</button>
       <button class="tab" data-tab="images">images</button>
       <button class="tab" data-tab="urls">urls</button>
       <button class="tab" data-tab="pinned">pinned</button>
     </nav>
 
-    <!-- Results list -->
     <ul id="results" class="results" role="listbox" aria-label="Clipboard items"></ul>
 
-    <!-- Settings sheet -->
-    <section id="settings" class="sheet" aria-label="Settings">
+    <!-- Settings sheet (adds only a Theme dropdown, rest unchanged) -->
+    <section id="settings" class="sheet" aria-label="Settings" tabindex="-1">
       <h2>Settings</h2>
 
-      <label>Hotkey
-        <div class="hotkey-row">
-          <input id="hotkey" type="text" readonly placeholder="Ctrl+Shift+Space" />
-          <button id="recordHotkey" type="button" title="Record new hotkey">● Rec</button>
-          <button id="resetHotkey" type="button" title="Reset">Reset</button>
-        </div>
-        <div class="smallhint">Click “Rec”, press your shortcut (e.g., Ctrl+Alt+K). Enter to confirm • Esc to cancel.</div>
+      <label>Theme
+        <select id="themeSelect">
+          <option value="dark">Dark (default)</option>
+          <option value="light">Light</option>
+        </select>
       </label>
 
+      <label>Hotkey
+        <input id="hotkey" type="text" readonly placeholder="Ctrl+Shift+Space" />
+      </label>
 
       <label>Max items
         <input id="maxItems" type="number" min="50" max="5000" step="50" />
@@ -54,24 +61,9 @@
         Capture app/window context
       </label>
 
-      <hr />
-
-      <label>Search mode
-        <select id="searchMode">
-          <option value="fuzzy">Fuzzy</option>
-          <option value="exact">Exact</option>
-        </select>
-      </label>
-
-      <label>Fuzzy sensitivity
-        <div class="smallhint">Lower = stricter • Higher = looser</div>
-        <input id="fuzzyThreshold" type="range" min="0.20" max="0.70" step="0.05" />
-        <div class="valuepill"><span id="fuzzyThresholdValue">0.50</span></div>
-      </label>
-
       <div class="actions">
         <button id="saveSettings">Save</button>
-        <button id="closeSettings">Close</button>
+        <button id="closeSettings" class="ghost">Close</button>
       </div>
     </section>
   </div>

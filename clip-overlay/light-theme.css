@@ -1,0 +1,90 @@
+/* Light theme: high-contrast color overrides ONLY.
+   Dark stays exactly as your base styles.css. */
+
+html[data-theme="light"] body { background:#F8FAFC; color:#0B1220; }
+
+/* Overlay & toolbar */
+html[data-theme="light"] .overlay{ background:rgba(255,255,255,0.98) !important; border-color:#E5E7EB !important; }
+html[data-theme="light"] .toolbar{ border-color:#E5E7EB !important; }
+html[data-theme="light"] .toolbar input#search{
+  background:#F3F4F6 !important; color:#0B1220 !important; border-color:#E5E7EB !important;
+}
+html[data-theme="light"] .toolbar input#search::placeholder{ color:#6B7280 !important; }
+
+/* Tabs — improved readability */
+html[data-theme="light"] .tabs{ border-color:#E5E7EB !important; }
+html[data-theme="light"] .tabs .tab{
+  color:#0B1220 !important;           /* inactive: near-black for strong contrast */
+  border-color:transparent !important;
+}
+html[data-theme="light"] .tabs .tab:hover{
+  background:#F3F4F6 !important;      /* subtle hover bg for inactive tabs */
+}
+html[data-theme="light"] .tabs .tab.active{
+  background:#EAF0FF !important;      /* selected */
+  color:#3F3DE0 !important;
+  border-color:#E5E7EB !important;
+}
+
+/* Results / rows */
+html[data-theme="light"] .results{ color:#0B1220 !important; }
+html[data-theme="light"] .row:hover{ background:#F3F4F6 !important; }
+html[data-theme="light"] .row.selected{ background:#EAF0FF !important; outline-color:#A5B4FC !important; }
+html[data-theme="light"] .thumbwrap{ background:#F3F4F6 !important; border-color:#E5E7EB !important; }
+html[data-theme="light"] .cell .primary{ color:#0B1220 !important; }
+html[data-theme="light"] .cell .meta{ color:#475569 !important; }
+html[data-theme="light"] .ocr-preview{ color:#6B7280 !important; }
+
+/* Buttons */
+html[data-theme="light"] button{ background:#4F46E5 !important; color:#FFFFFF !important; }
+html[data-theme="light"] button:hover{ background:#4338CA !important; }
+html[data-theme="light"] button.ghost{ background:transparent !important; color:#0B1220 !important; border:1px solid #E5E7EB !important; }
+html[data-theme="light"] button.ghost:hover{ background:#F3F4F6 !important; }
+
+/* SETTINGS SHEET — force light */
+html[data-theme="light"] .overlay .sheet{
+  background:#FFFFFF !important; border-color:#E5E7EB !important; color:#0B1220 !important;
+}
+html[data-theme="light"] .overlay .sheet h2{ color:#0B1220 !important; }
+html[data-theme="light"] .overlay .sheet label,
+html[data-theme="light"] .overlay .sheet .rowline{ color:#0B1220 !important; }
+
+html[data-theme="light"] .overlay .sheet input,
+html[data-theme="light"] .overlay .sheet select{
+  background:#F9FAFB !important; color:#0B1220 !important; border:1px solid #E5E7EB !important;
+}
+html[data-theme="light"] .overlay .sheet input::placeholder{ color:#6B7280 !important; }
+
+html[data-theme="light"] .overlay .sheet .actions button.ghost{
+  background:transparent !important; color:#0B1220 !important; border:1px solid #E5E7EB !important;
+}
+html[data-theme="light"] .overlay .sheet .actions button.ghost:hover{ background:#F3F4F6 !important; }
+
+/* Scrollbar */
+html[data-theme="light"] .results::-webkit-scrollbar-thumb{ background:#E5E7EB !important; }
+
+
+/* --- Fix unreadable content in Light --- */
+html[data-theme="light"] .results { color:#0B1220 !important; }
+
+/* Some bases dim non-selected rows via opacity — cancel that */
+html[data-theme="light"] .row { opacity: 1 !important; }
+
+/* Ensure primary line and links are full-contrast */
+html[data-theme="light"] .row .primary,
+html[data-theme="light"] .row .primary a {
+  color:#0B1220 !important;
+}
+
+/* Timestamps / app names */
+html[data-theme="light"] .row .meta { color:#475569 !important; }
+
+/* Selected row still readable on its blue background */
+html[data-theme="light"] .row.selected .primary,
+html[data-theme="light"] .row.selected .primary a {
+  color:#0B1220 !important;
+}
+
+/* (Optional) make non-selected link URLs not purple/blue if your base styles set them */
+html[data-theme="light"] .results a { color:#0B1220 !important; text-decoration:none; }
+html[data-theme="light"] .row:hover .primary a { text-decoration:underline; }

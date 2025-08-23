@@ -13,7 +13,9 @@
     "dev-win": "set NODE_ENV=development && electron ."
   },
   "dependencies": {
-    "electron-store": "^8.2.0"
+    "@tesseract.js-data/eng": "^1.0.0",
+    "electron-store": "^8.2.0",
+    "tesseract.js": "^6.0.1"
   },
   "devDependencies": {
     "electron": "^30.0.0",
@@ -23,6 +25,9 @@
     "appId": "com.fouwaz.snippetstash",
     "productName": "SnippetStash",
     "asar": true,
+    "extraResources": [
+       { "from": "node_modules/@tesseract.js-data/eng", "to": "tessdata/eng" }
+    ],
     "files": [
       "main.js",
       "preload.js",
