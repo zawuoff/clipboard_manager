@@ -1,4 +1,5 @@
-// main.js — adds safe "Capture app/window context"
+// main.js — ORIGINAL FEATURES PRESERVED + Smart Tags (auto + OCR)
+// (Based on your original main.js, adds only small, isolated changes)
 const {
   app, BrowserWindow, globalShortcut, clipboard, ipcMain, nativeImage, shell,
 } = require('electron');
@@ -14,7 +15,7 @@ const { createWorker } = require('tesseract.js');
 
 let ocrWorker;
 
-/* ---------- Tesseract language resolution (local/resources/node_modules) ---------- */
+/* ---------- Tesseract language resolution (unchanged) ---------- */
 function findEngModelDir(baseDir) {
   if (!baseDir) return null;
   try {
@@ -67,33 +68,33 @@ async function getOcrWorker() {
 }
 app.on('will-quit', async () => { try { await ocrWorker?.terminate(); } catch {} });
 
-/* ---------- Stores ---------- */
+/* ---------- Stores (unchanged) ---------- */
 const settingsStore = new Store({
   name: 'settings',
   defaults: {
     theme: 'dark',
     hotkey: 'CommandOrControl+Shift+Space',
     maxItems: 500,
-    captureContext: false,       // UI toggle; now honored
+    captureContext: false,
     searchMode: 'fuzzy',
     fuzzyThreshold: 0.4,
   },
 });
 const historyStore = new Store({ name: 'history', defaults: { items: [] } });
 
-/* ---------- State ---------- */
+/* ---------- State (unchanged) ---------- */
 let overlayWin = null;
 let clipboardPollTimer = null;
 let lastClipboardText = '';
 let lastImageHash = '';
 
-/* ---------- Context capture (active-win; ESM safe) ---------- */
-let activeWinGetter = null;   // function or null
+/* ---------- Context capture (unchanged) ---------- */
+let activeWinGetter = null;
 let activeWinTimer = null;
-let lastRealWin = null;       // { app, title, ts }
+let lastRealWin = null;
 
 async function maybeLoadActiveWin() {
-  if (activeWinGetter !== null) return activeWinGetter; // cached
+  if (activeWinGetter !== null) return activeWinGetter;
   try {
     const mod = await import('active-win');
     activeWinGetter = typeof mod.default === 'function' ? mod.default : null;
@@ -119,7 +120,7 @@ function isNoiseWindow(info) {
 }
 async function startActiveWinSampling() {
   const getWin = await maybeLoadActiveWin();
-  if (!getWin) return; // gracefully no-op if not available
+  if (!getWin) return;
   if (activeWinTimer) clearInterval(activeWinTimer);
 
   activeWinTimer = setInterval(async () => {
@@ -141,7 +142,7 @@ function stopActiveWinSampling() {
   lastRealWin = null;
 }
 function pickContextNowSync() {
-  const MAX_AGE = 7000; // ms
+  const MAX_AGE = 7000;
   if (lastRealWin && (Date.now() - lastRealWin.ts) <= MAX_AGE) {
     return { app: lastRealWin.app, title: lastRealWin.title };
   }
@@ -159,10 +160,11 @@ async function pickContextOnDemand() {
   return undefined;
 }
 
-/* ---------- Helpers ---------- */
+/* ---------- Helpers (original + tiny additions) ---------- */
 function userDir(...p) { return path.join(app.getPath('userData'), ...p); }
 async function ensureDir(dir) { await fsp.mkdir(dir, { recursive: true }); }
 function sha1(buf) { return crypto.createHash('sha1').update(buf).digest('hex'); }
+const uniq = (arr) => Array.from(new Set((arr || []).filter(Boolean).map(s => String(s).toLowerCase())));
 
 async function persistImage(nimg, id) {
   const outDir = userDir('clips', 'imgs'); await ensureDir(outDir);
@@ -209,7 +211,34 @@ async function enforceMaxAndCleanup(items) {
   ));
 }
 
-/* ---------- Overlay ---------- */
+/* ---------- NEW: Auto-tagging heuristics (lightweight) ---------- */
+const RX = {
+  url: /\b((https?:\/\/|www\.)[^\s/$.?#].[^\s]*)/i,
+  email: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i,
+  mdDate: /\b(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})\b/i,
+  monthDate: /\b(jan(uary)?|feb(ruary)?|mar(ch)?|apr(il)?|may|jun(e)?|jul(y)?|aug(ust)?|sep(t)?(ember)?|oct(ober)?|nov(ember)?|dec(ember)?)[^\n]*\b(\d{1,2})(st|nd|rd|th)?\b/i,
+  number: /\b\d[\d,]*([.]\d+)?\b/,
+};
+function looksLikeCode(s) {
+  if (!s) return false;
+  const lines = String(s).split('\n');
+  if (lines.length >= 3 && /[{;}()=<>[\]]/.test(s)) return true;
+  if (/```/.test(s)) return true;
+  if (/\b(function|const|let|var|class|import|export|def|public|private|if|else|for|while|return|try|catch)\b/.test(s)) return true;
+  return false;
+}
+function autoTagsForText(text) {
+  const t = String(text || '');
+  const tags = [];
+  if (RX.url.test(t)) tags.push('url');
+  if (RX.email.test(t)) tags.push('email');
+  if (RX.mdDate.test(t) || RX.monthDate.test(t)) tags.push('date');
+  if (RX.number.test(t)) tags.push('number');
+  if (looksLikeCode(t)) tags.push('code');
+  return uniq(tags);
+}
+
+/* ---------- Overlay (unchanged) ---------- */
 function createOverlay() {
   if (overlayWin) return overlayWin;
   overlayWin = new BrowserWindow({
@@ -239,7 +268,7 @@ ipcMain.handle('overlay:hide', () => {
   overlayWin.hide();
 });
 
-/* ---------- Hotkey ---------- */
+/* ---------- Hotkey (unchanged) ---------- */
 function registerHotkey() {
   const hk = (settingsStore.get('hotkey') || 'CommandOrControl+Shift+Space').trim();
   globalShortcut.unregisterAll();
@@ -247,7 +276,7 @@ function registerHotkey() {
   if (!ok) globalShortcut.register('CommandOrControl+Shift+Space', showOverlay);
 }
 
-/* ---------- Clipboard polling (adds context when enabled) ---------- */
+/* ---------- Clipboard polling (ORIGINAL + tags injection) ---------- */
 function captureSourceIfEnabled() {
   if (!settingsStore.get('captureContext')) return undefined;
   return pickContextNowSync();
@@ -271,13 +300,14 @@ function startClipboardPolling() {
           const id = Date.now();
           const meta = await persistImage(img, id);
           const items = historyStore.get('items') || [];
-          items.unshift({ id, type: 'image', pinned: false, ts: new Date().toISOString(), source, ...meta });
+          // Start images with empty tags; OCR may add later
+          items.unshift({ id, type: 'image', pinned: false, ts: new Date().toISOString(), source, tags: [], ...meta });
           sortItems(items);
           await enforceMaxAndCleanup(items);
           historyStore.set('items', items);
           overlayWin?.webContents?.send('history:update', items);
 
-          // OCR off-thread
+          // OCR off-thread → also auto-tag OCR text
           (async () => {
             try {
               const worker = await getOcrWorker();
@@ -288,7 +318,10 @@ function startClipboardPolling() {
               const itemsNow = historyStore.get('items') || [];
               const idx = itemsNow.findIndex(i => i.id === id);
               if (idx >= 0) {
+                const addTags = autoTagsForText(text);
+                const existing = uniq(itemsNow[idx].tags || []);
                 itemsNow[idx].ocrText = text.length > 12000 ? text.slice(0, 12000) : text;
+                itemsNow[idx].tags = uniq([...existing, ...addTags, 'ocr']);
                 historyStore.set('items', itemsNow);
                 overlayWin?.webContents?.send('history:update', itemsNow);
               }
@@ -314,7 +347,8 @@ function startClipboardPolling() {
     if (items.length && items[0].type === 'text' && items[0].text === text) return;
 
     const id = Date.now();
-    items.unshift({ id, type: 'text', text, pinned: false, ts: new Date().toISOString(), source });
+    const tags = autoTagsForText(text); // <-- NEW
+    items.unshift({ id, type: 'text', text, pinned: false, ts: new Date().toISOString(), source, tags });
     sortItems(items);
     await enforceMaxAndCleanup(items);
     historyStore.set('items', items);
@@ -322,7 +356,7 @@ function startClipboardPolling() {
   }, 200);
 }
 
-/* ---------- IPC ---------- */
+/* ---------- IPC (unchanged API — you already have generic update) ---------- */
 ipcMain.handle('history:get', () => historyStore.get('items') || []);
 ipcMain.handle('history:clear', async () => {
   const items = historyStore.get('items') || [];
@@ -336,6 +370,8 @@ ipcMain.handle('history:updateItem', (_e, { id, patch }) => {
   const idx = items.findIndex(i => i.id === id);
   if (idx >= 0) {
     items[idx] = { ...items[idx], ...patch };
+    // ensure tags stay unique/lowercase if provided
+    if (patch && Array.isArray(patch.tags)) items[idx].tags = Array.from(new Set(patch.tags.map(t => String(t).toLowerCase().trim()).filter(Boolean)));
     sortItems(items);
     historyStore.set('items', items);
     overlayWin?.webContents?.send('history:update', items);
@@ -398,7 +434,7 @@ ipcMain.handle('clipboard:set', (_e, data) => {
   return false;
 });
 
-/* ---------- Lifecycle ---------- */
+/* ---------- Lifecycle (unchanged) ---------- */
 app.setAppUserModelId('com.fouwaz.snippetstash');
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();

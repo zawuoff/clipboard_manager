@@ -343,3 +343,107 @@ html, body { background: transparent !important; }
   border-radius: 3px;
   padding: 0 1px;
 }
+
+/* …everything in your original styles.css is kept… */
+
+/* === Tag pills (new) === */
+.tags {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+  margin: 6px 0 2px;
+}
+.tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 8px; border-radius: 999px;
+  background: rgba(255,255,255,0.06); color: var(--text);
+  font-size: 12px; border: 1px solid var(--border);
+  cursor: pointer;
+}
+.tag:hover { background: rgba(255,255,255,0.10); }
+.tag-x {
+  font-size: 12px; line-height: 1; border: none; background: transparent; color: #b9bcc6;
+  cursor: pointer; padding: 0;
+}
+.tag-add {
+  height: 22px; padding: 0 8px; border-radius: 999px;
+  border: 1px dashed var(--border); background: transparent; color: var(--text);
+  cursor: pointer; font-size: 12px;
+}
+
+/* optional: OCR preview already styled via .primary/.meta; keep your existing rules */
+
+/* --- Settings flyout (top-right) --- */
+.overlay { position: relative; }
+
+#settings {
+  position: absolute;
+  top: 52px;            /* sits just under the toolbar */
+  right: 16px;
+  width: 320px;         /* keep it compact */
+  max-height: 70vh;
+  overflow: auto;
+
+  /* card look – play nice with your existing tokens if present */
+  background: var(--card, rgba(20,20,24,0.96));
+  color: var(--text, #e5e7eb);
+  border: 1px solid var(--border, rgba(110,110,120,0.35));
+  border-radius: 12px;
+  box-shadow: 0 14px 40px rgba(0,0,0,0.35);
+  padding: 12px;
+
+  /* start hidden; .open will reveal it */
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition: opacity .15s ease, transform .15s ease;
+  z-index: 40;          /* above list */
+}
+
+#settings.open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+#settings .actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+
+/* --- Settings flyout (top-right) override --- */
+/* Works alongside your existing #settings.sheet rule */
+#settings.sheet.flyout {
+  position: absolute;
+  top: 56px;
+  right: 16px;
+  width: 320px;
+  max-height: 70vh;
+  overflow: auto;
+
+  /* flyout look */
+  display: block;                 /* override the default display:none */
+  background: var(--bg, rgb(24,24,28));
+  color: var(--text, #e5e7eb);
+  border: 1px solid var(--border, rgba(255,255,255,0.08));
+  border-radius: 12px;
+  box-shadow: var(--shadow, 0 14px 40px rgba(0,0,0,0.35));
+  padding: 12px;
+  z-index: 40;
+
+  /* hidden by default until .open is added */
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition: opacity .15s ease, transform .15s ease;
+}
+
+#settings.sheet.flyout.open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0);
+}
+
+/* Pin settings to overlay’s right side (minimal, safe) */
+.overlay { position: relative; }
+#settings.sheet { position: absolute; right: 16px; left: auto; top: 56px; transform-origin: top right; }

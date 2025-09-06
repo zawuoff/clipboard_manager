@@ -5,7 +5,8 @@
   "scripts": {
     "start": "electron .",
     "pack": "electron-builder --dir",
-    "dist": "electron-builder --win nsis"
+    "dist": "electron-builder --win nsis",
+    "dev": "nodemon --exec electron ."
   },
   "build": {
     "appId": "com.fouwaz.snippetstash",

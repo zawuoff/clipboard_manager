@@ -1,4 +1,5 @@
-// renderer.js
+// renderer.js — ORIGINAL UI PRESERVED + Smart Tags & Filters
+// Tabs, fuzzy/exact search, URL open, OCR preview, keyboard nav: unchanged
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -41,7 +42,7 @@ let cfg = {
 let lastQuery = '';
 let lastMode  = 'fuzzy';
 
-/* ---------- Utils ---------- */
+/* ---------- Utils (original + helpers) ---------- */
 function escapeHTML(s='') {
   return String(s).replace(/[&<>"']/g,(m)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
 }
@@ -60,6 +61,7 @@ function extractUrlFromText(text = "") {
 function isUrlItem(it) {
   return it.type === 'text' && URL_RE.test(String(it.text || ''));
 }
+const uniq = (arr) => Array.from(new Set((arr || []).filter(Boolean).map(s => String(s).toLowerCase())));
 
 /* ---------- Fuzzy matching (span density) ---------- */
 function fuzzyMatch(hayRaw = '', qRaw = '') {
@@ -72,7 +74,6 @@ function fuzzyMatch(hayRaw = '', qRaw = '') {
   const len  = hayL.length;
   const qlen = qL.length;
 
-  // Substring first
   const idx = hayL.indexOf(qL);
   if (idx >= 0) {
     const pos = new Set();
@@ -83,7 +84,6 @@ function fuzzyMatch(hayRaw = '', qRaw = '') {
     return { score, pos };
   }
 
-  // Greedy subsequence
   let i = 0, j = 0, first = -1, last = -1;
   const pos = new Set();
   while (i < len && j < qlen) {
@@ -120,7 +120,7 @@ function renderWithHighlights(text = '', posSet = new Set()) {
   return html;
 }
 
-/* ---------- Sorting & rendering ---------- */
+/* ---------- Sorting & rendering (original) ---------- */
 function sortCombined(arr) {
   arr.sort((a, b) =>
     (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) ||
@@ -142,13 +142,79 @@ function baseSearchTextForItem(it) {
   return (it.ocrText && it.ocrText.trim()) ? it.ocrText : meta;
 }
 
+/* ---------- NEW: Query parsing & filters ---------- */
+function parseQuery(q) {
+  const out = { text: [], include: [], exclude: [], type: null, hasOCR: null, pinned: null };
+  const parts = String(q || '').trim().split(/\s+/).filter(Boolean);
+  for (const p of parts) {
+    const mTag = p.match(/^(-)?tag:(.+)$/i);
+    if (mTag) { (mTag[1] ? out.exclude : out.include).push(mTag[2].toLowerCase()); continue; }
+    const mType = p.match(/^type:(image|text)$/i);
+    if (mType) { out.type = mType[1].toLowerCase(); continue; }
+    const mHas = p.match(/^has:(ocr)$/i);
+    if (mHas) { out.hasOCR = true; continue; }
+    const mPin = p.match(/^pinned:(yes|no)$/i);
+    if (mPin) { out.pinned = (mPin[1].toLowerCase() === 'yes'); continue; }
+    out.text.push(p);
+  }
+  return out;
+}
+function itemPassesFilters(it, qobj) {
+  if (qobj.type && it.type !== qobj.type) return false;
+  if (qobj.pinned != null && !!it.pinned !== qobj.pinned) return false;
+  if (qobj.hasOCR && !it.ocrText) return false;
+  const tags = uniq(it.tags || []);
+  for (const t of qobj.include) if (!tags.includes(t)) return false;
+  for (const t of qobj.exclude) if (tags.includes(t)) return false;
+  return true;
+}
+
+/* ---------- Rendering (add tag pills under primary) ---------- */
+function tagPill(text, { removable = false, onRemove } = {}) {
+  const pill = document.createElement('span');
+  pill.className = 'tag';
+  pill.textContent = text;
+  pill.title = `Filter by tag:${text}`;
+  pill.addEventListener('click', (e) => {
+    e.stopPropagation();
+    const cur = searchEl.value.trim();
+    searchEl.value = (cur ? cur + ' ' : '') + `tag:${text}`;
+    applyFilter();
+  });
+  if (removable) {
+    const x = document.createElement('button');
+    x.className = 'tag-x';
+    x.textContent = '×';
+    x.title = 'Remove tag';
+    x.addEventListener('click', (e) => { e.stopPropagation(); onRemove?.(); });
+    pill.appendChild(x);
+  }
+  return pill;
+}
+async function addTagsForItem(it) {
+  const input = prompt('Add tag(s), comma-separated:', '');
+  if (!input) return;
+  const newTags = uniq((it.tags || []).concat(input.split(',').map(s => s.trim())));
+  await window.api.updateHistoryItem(it.id, { tags: newTags });
+  items = await window.api.getHistory();
+  applyFilter();
+}
+async function removeTagForItem(it, tag) {
+  const next = uniq((it.tags || []).filter(t => t !== tag));
+  await window.api.updateHistoryItem(it.id, { tags: next });
+  items = await window.api.getHistory();
+  applyFilter();
+}
+
 function render(list = []) {
   resultsEl.innerHTML = '';
   const q = lastQuery;
+  const qobj = parseQuery(q);
+  const textNeedle = qobj.text.join(' ');
 
   list.forEach((it) => {
     const li = document.createElement('li');
-    li.className = 'row';
+    li.className = 'row' + (it.type === 'image' ? ' image' : '');
     li.dataset.id = it.id;
 
     if (it.type === 'image') {
@@ -157,7 +223,7 @@ function render(list = []) {
 
       const ocrFull = (it.ocrText || '').trim();
       const ocrPreview = ocrFull ? ocrFull.slice(0, 120) : '';
-      const pos = q && ocrPreview ? fuzzyMatch(ocrPreview, q).pos : new Set();
+      const pos = textNeedle && ocrPreview ? fuzzyMatch(ocrPreview, textNeedle).pos : new Set();
       const ocrHTML = ocrPreview
         ? `<div class="ocr-preview">${renderWithHighlights(ocrPreview, pos)}${ocrFull.length>120?'…':''}</div>`
         : '';
@@ -169,6 +235,7 @@ function render(list = []) {
         <div class="cell">
           <div class="primary">Image${dims}</div>
           ${ocrHTML}
+          <div class="tags"></div>
           <div class="meta">
             ${new Date(it.ts || Date.now()).toLocaleString()}${ctx}
             <button class="pin-btn" data-id="${it.id}" title="${it.pinned ? 'Unpin' : 'Pin'}">${it.pinned ? '⭐' : '☆'}</button>
@@ -179,7 +246,7 @@ function render(list = []) {
     } else {
       const ctx = it.source ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}` : '';
       const rawPrimary = trimOneLine(it.text || '');
-      const pos = q ? fuzzyMatch(rawPrimary, q).pos : new Set();
+      const pos = textNeedle ? fuzzyMatch(rawPrimary, textNeedle).pos : new Set();
       const primaryHTML = renderWithHighlights(rawPrimary, pos);
 
       const openBtnHTML = isUrlItem(it)
@@ -187,6 +254,7 @@ function render(list = []) {
         : '';
       li.innerHTML = `
         <div class="primary">${primaryHTML}</div>
+        <div class="tags"></div>
         <div class="meta">
           ${new Date(it.ts || Date.now()).toLocaleString()}${ctx}
           <button class="pin-btn" data-id="${it.id}" title="${it.pinned ? 'Unpin' : 'Pin'}">${it.pinned ? '⭐' : '☆'}</button>
@@ -196,13 +264,26 @@ function render(list = []) {
       `;
     }
 
+    // Render tag pills
+    const wrap = li.querySelector('.tags');
+    const tagList = uniq(it.tags || []);
+    if (wrap) {
+      tagList.forEach(t => wrap.appendChild(tagPill(t, { removable: true, onRemove: () => removeTagForItem(it, t) })));
+      const addBtn = document.createElement('button');
+      addBtn.className = 'tag-add';
+      addBtn.textContent = '+ Tag';
+      addBtn.title = 'Add tag';
+      addBtn.addEventListener('click', (e) => { e.stopPropagation(); addTagsForItem(it); });
+      wrap.appendChild(addBtn);
+    }
+
     resultsEl.appendChild(li);
   });
 
   setSelected(Math.min(selectedIndex, Math.max(0, list.length - 1)));
 }
 
-/* ---------- Tabs UI ---------- */
+/* ---------- Tabs UI (unchanged) ---------- */
 function updateTabsUI() {
   if (!tabsEl) return;
   Array.from(tabsEl.querySelectorAll('.tab')).forEach(btn => {
@@ -210,18 +291,25 @@ function updateTabsUI() {
   });
 }
 
-/* ---------- Filtering & search ---------- */
+/* ---------- Filtering & search (extended) ---------- */
 function applyFilter() {
   const q = (searchEl.value || '').trim();
   lastQuery = q;
   lastMode  = (searchModeEl?.value || cfg.searchMode || 'fuzzy');
 
+  const qobj = parseQuery(q);
+
   let scope = items.slice();
+  // Tabs first (original behavior)
   if (currentTab === 'images') scope = scope.filter(i => i.type === 'image');
   if (currentTab === 'urls')   scope = scope.filter(i => i.type !== 'image' && isUrlItem(i));
   if (currentTab === 'pinned') scope = scope.filter(i => !!i.pinned);
 
-  if (!q) {
+  // Then apply advanced filters (type/has:ocr/pinned/tag includes/excludes)
+  scope = scope.filter(it => itemPassesFilters(it, qobj));
+
+  // No text part? keep your default sort & render
+  if (qobj.text.length === 0) {
     filtered = scope;
     sortCombined(filtered);
     selectedIndex = 0;
@@ -229,18 +317,20 @@ function applyFilter() {
     return render(filtered);
   }
 
+  // Text search part
   if (lastMode === 'fuzzy') {
     const thresh = Number(fuzzyThreshEl?.value || cfg.fuzzyThreshold || 0.4);
+    const needle = qobj.text.join(' ');
     const matches = [];
     for (const it of scope) {
-      const s = fuzzyMatch(baseSearchTextForItem(it), q).score;
+      const s = fuzzyMatch(baseSearchTextForItem(it), needle).score;
       if (s >= thresh) matches.push({ ...it, _score: s });
     }
     sortByScoreThenDefault(matches);
     filtered = matches;
   } else {
-    const qlc = q.toLowerCase();
-    filtered = scope.filter(it => String(baseSearchTextForItem(it)).toLowerCase().includes(qlc));
+    const needle = qobj.text.join(' ').toLowerCase();
+    filtered = scope.filter(it => String(baseSearchTextForItem(it)).toLowerCase().includes(needle));
     sortCombined(filtered);
   }
 
@@ -249,7 +339,7 @@ function applyFilter() {
   render(filtered);
 }
 
-/* ---------- Selection & actions ---------- */
+/* ---------- Selection & actions (unchanged) ---------- */
 function setSelected(i) {
   selectedIndex = Math.max(0, Math.min((filtered.length - 1), i));
   Array.from(resultsEl.children).forEach((el, idx) => {
@@ -269,7 +359,7 @@ function chooseByRow(row) {
   window.api.hideOverlay();
 }
 
-/* ---------- Keyboard ---------- */
+/* ---------- Keyboard (unchanged) ---------- */
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { window.api.hideOverlay(); e.preventDefault(); return; }
   if (e.key === 'ArrowDown') { setSelected(selectedIndex + 1); e.preventDefault(); }
@@ -283,7 +373,7 @@ document.addEventListener('keydown', (e) => {
 /* ---------- Search ---------- */
 searchEl.addEventListener('input', () => applyFilter());
 
-/* ---------- Tabs click ---------- */
+/* ---------- Tabs click (unchanged) ---------- */
 if (tabsEl) {
   tabsEl.addEventListener('click', (e) => {
     const btn = e.target.closest('.tab');
@@ -296,7 +386,7 @@ if (tabsEl) {
   });
 }
 
-/* ---------- Click delegation ---------- */
+/* ---------- Click delegation (unchanged actions) ---------- */
 resultsEl.addEventListener('click', async (e) => {
   const openBtn = e.target.closest('.open-btn');
   if (openBtn) {
@@ -334,12 +424,12 @@ resultsEl.addEventListener('click', async (e) => {
   if (row) chooseByRow(row);
 });
 
-/* ---------- Click outside card closes ---------- */
+/* ---------- Click outside card closes (unchanged) ---------- */
 document.addEventListener('mousedown', (e) => {
   if (!e.target.closest('.overlay')) window.api.hideOverlay();
 });
 
-/* ---------- Hotkey capture ---------- */
+/* ---------- Hotkey capture (unchanged) ---------- */
 function keyToElectronKey(e) {
   if (/^[a-zA-Z]$/.test(e.key)) return e.key.toUpperCase();
   if (/^[0-9]$/.test(e.key)) return e.key;
@@ -390,13 +480,13 @@ hotkeyEl?.addEventListener('keydown', (e) => {
   }
 });
 
-/* ---------- Theme ---------- */
+/* ---------- Theme (unchanged) ---------- */
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
 }
 themeEl?.addEventListener('change', () => applyTheme(themeEl.value));
 
-/* ---------- Boot ---------- */
+/* ---------- Boot (unchanged except rendering supports tags) ---------- */
 async function boot() {
   items = await window.api.getHistory().catch(() => []);
   try {
@@ -446,7 +536,7 @@ window.addEventListener('DOMContentLoaded', async () => {
   window.api.onOverlayAnim((visible) => overlayCard?.classList.toggle('show', !!visible));
 });
 
-/* ---------- Settings ---------- */
+/* ---------- Settings (unchanged) ---------- */
 clearBtn?.addEventListener('click', async () => {
   await window.api.clearHistory();
   items = [];
@@ -474,3 +564,118 @@ saveBtn?.addEventListener('click', async () => {
   applyTheme(cfg.theme);
   applyFilter();
 });
+
+
+/* ---------- Settings flyout shim (safe, minimal) ---------- */
+(function () {
+  const settingsEl  = document.getElementById('settings');
+  const settingsBtn = document.getElementById('settingsBtn');
+  const saveBtn     = document.getElementById('saveSettings');
+  const closeBtn    = document.getElementById('closeSettings');
+
+  function openSettings()  { settingsEl && settingsEl.classList.add('open'); }
+  function closeSettings() { settingsEl && settingsEl.classList.remove('open'); }
+  function toggleSettings(){ settingsEl && settingsEl.classList.toggle('open'); }
+
+  // Ensure panel is CLOSED on boot, even if HTML had 'open' by mistake
+  document.addEventListener('DOMContentLoaded', () => {
+    closeSettings();
+
+    settingsBtn && settingsBtn.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      toggleSettings();
+    });
+
+    // Close on Save/Close; your existing saveSettings logic (if any) still runs
+    saveBtn && saveBtn.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      closeSettings();
+    });
+
+    closeBtn && closeBtn.addEventListener('click', (e) => {
+      e.preventDefault(); e.stopPropagation();
+      closeSettings();
+    });
+  });
+
+  // Also allow Esc to close just the settings panel (without hiding overlay)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && settingsEl && settingsEl.classList.contains('open')) {
+      e.preventDefault();
+      closeSettings();
+    }
+  });
+})();
+
+
+/* ---------- FIX: settings flyout + robust tab wiring ---------- */
+(() => {
+  const settingsEl  = document.getElementById('settings');
+  const settingsBtn = document.getElementById('settingsBtn');
+  const saveBtn     = document.getElementById('saveSettings');
+  const closeBtn    = document.getElementById('closeSettings');
+  const tabsEl      = document.querySelector('.tabs');
+
+  function openSettings()  { settingsEl && settingsEl.classList.add('open'); }
+  function closeSettings() { settingsEl && settingsEl.classList.remove('open'); }
+
+  document.addEventListener('DOMContentLoaded', () => {
+    // Make it a top-right flyout (keeps your bottom-sheet CSS as fallback)
+    if (settingsEl) {
+      settingsEl.classList.add('flyout');     // enables the flyout override CSS
+      settingsEl.classList.remove('open');    // start closed
+    }
+
+    if (settingsBtn && !settingsBtn.dataset.wired) {
+      settingsBtn.dataset.wired = '1';
+      settingsBtn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        settingsEl.classList.toggle('open');
+        if (settingsEl.classList.contains('open')) {
+          // focus first control for immediate typing
+          settingsEl.querySelector('input,select,button,textarea')?.focus();
+        }
+      });
+    }
+
+    if (saveBtn && !saveBtn.dataset.wired) {
+      saveBtn.dataset.wired = '1';
+      saveBtn.addEventListener('click', (e) => {
+        // Your existing save handler still runs; this only guarantees close.
+        e.stopPropagation();
+        closeSettings();
+      });
+    }
+
+    if (closeBtn && !closeBtn.dataset.wired) {
+      closeBtn.dataset.wired = '1';
+      closeBtn.addEventListener('click', (e) => {
+        e.preventDefault(); e.stopPropagation();
+        closeSettings();
+      });
+    }
+
+    // Defensive re-bind of tabs (restores images/urls/pinned switching if lost)
+    if (tabsEl && !tabsEl.dataset.wired) {
+      tabsEl.dataset.wired = '1';
+      tabsEl.addEventListener('click', (e) => {
+        const btn = e.target.closest('.tab');
+        if (!btn) return;
+        // Uses the existing globals/functions in your file:
+        currentTab = btn.dataset.tab || 'recent';
+        localStorage.setItem('clip_tab', currentTab);
+        updateTabsUI();
+        applyFilter();
+        document.getElementById('search')?.focus();
+      });
+    }
+  });
+
+  // Let Esc close just the settings (without hiding overlay)
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && settingsEl && settingsEl.classList.contains('open')) {
+      e.preventDefault();
+      closeSettings();
+    }
+  });
+})();

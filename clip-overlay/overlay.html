@@ -20,7 +20,7 @@
       <input
         id="search"
         type="text"
-        placeholder="Search (↑/↓ navigate, Enter to copy, Esc to close)…"
+        placeholder="Search your clipboard…"
         aria-label="Search clipboard"
       />
       <div class="spacer"></div>
@@ -28,6 +28,7 @@
       <button id="settingsBtn" title="Settings">⚙</button>
     </header>
 
+    <!-- RESTORED TABS -->
     <nav class="tabs" aria-label="Filters">
       <button class="tab" data-tab="recent">recent</button>
       <button class="tab" data-tab="images">images</button>
@@ -37,9 +38,9 @@
 
     <ul id="results" class="results" role="listbox" aria-label="Clipboard items"></ul>
 
-    <!-- Settings sheet -->
+    <!-- Settings flyout (works with the JS you have now) -->
     <section id="settings" class="sheet" aria-label="Settings" tabindex="-1">
-      <h2>Settings</h2>
+      <h3>Settings</h3>
 
       <label class="stack">
         <span>Theme</span>
@@ -50,35 +51,24 @@
       </label>
 
       <label class="stack">
-        <span>Hotkey</span>
-        <input
-          id="hotkey"
-          type="text"
-          placeholder="Click, then press shortcut (e.g. Ctrl+Shift+Space)"
-          autocomplete="off"
-          spellcheck="false"
-          inputmode="none"
-        />
+        <span>Global Hotkey</span>
+        <input id="hotkey" type="text" placeholder="Click, then press keys…" />
       </label>
-      <div>Click, then press shortcut (e.g. Ctrl+Shift+Space)</div>
 
       <label class="stack">
         <span>Max items</span>
         <input id="maxItems" type="number" min="50" max="5000" step="50" />
       </label>
 
-      <label class="rowline">
-        <input id="captureContext" type="checkbox" />
+      <label class="stack">
         <span>Capture app/window context</span>
+        <input id="captureContext" type="checkbox" />
       </label>
 
-      <div class="divider"></div>
-      <h3>Search</h3>
-
       <label class="stack">
-        <span>Mode</span>
+        <span>Search mode</span>
         <select id="searchMode">
-          <option value="fuzzy">Fuzzy (recommended)</option>
+          <option value="fuzzy">Fuzzy</option>
           <option value="exact">Exact</option>
         </select>
       </label>
