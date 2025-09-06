@@ -26,6 +26,7 @@ const themeEl = $('#theme');
 /* Tabs */
 const tabsEl = document.querySelector('.tabs');
 const autoPasteEl = document.getElementById('autoPasteOnSelect'); // (exists in settings UI)
+const overlaySizeEl = document.getElementById('overlaySize'); // NEW
 
 /* ---------- State ---------- */
 let items = [];
@@ -506,6 +507,7 @@ async function boot() {
     cfg.fuzzyThreshold = typeof s.fuzzyThreshold === 'number' ? s.fuzzyThreshold : cfg.fuzzyThreshold;
     cfg.autoPasteOnSelect = !!s.autoPasteOnSelect; // <— NEW (keep in memory)
 
+    if (overlaySizeEl) overlaySizeEl.value = (s.overlaySize || 'large');
     if (autoPasteEl) autoPasteEl.checked = cfg.autoPasteOnSelect; // <— NEW reflect in UI
     if (themeEl) themeEl.value = cfg.theme;
     applyTheme(cfg.theme);
@@ -575,6 +577,7 @@ saveBtn?.addEventListener('click', async () => {
     searchMode: (searchModeEl?.value || cfg.searchMode),
     fuzzyThreshold: Number(fuzzyThreshEl?.value || cfg.fuzzyThreshold || 0.4),
     autoPasteOnSelect: !!(autoPasteEl?.checked ?? cfg.autoPasteOnSelect), // <— NEW
+    overlaySize: (overlaySizeEl?.value || 'large'),
   };
   cfg = { ...cfg, ...payload };
   try { await window.api.saveSettings(payload); } catch {}

@@ -76,6 +76,7 @@ const settingsStore = new Store({
     // NEW (no UI change; default ON)
     autoPasteOnSelect: true,
     debugLogging: true,
+    overlaySize: 'large', // NEW
   },
 });
 const historyStore = new Store({ name: 'history', defaults: { items: [] } });
@@ -185,6 +186,31 @@ async function ensureDir(dir) { await fsp.mkdir(dir, { recursive: true }); }
 function sha1(buf) { return crypto.createHash('sha1').update(buf).digest('hex'); }
 const uniq = (arr) => Array.from(new Set((arr || []).filter(Boolean).map(s => String(s).toLowerCase())));
 
+function overlayWH(size) {
+  switch ((size || 'large').toLowerCase()) {
+    case 'small':  return { width: 640, height: 440 };
+    case 'medium': return { width: 800, height: 520 };
+    default:       return { width: 900, height: 560 }; // current size = large
+  }
+}
+
+// Centers the overlay on the display under the mouse cursor
+function centerOverlayOnActiveDisplay(win, width, height) {
+  try {
+    const { screen } = require('electron');
+    const pt = screen.getCursorScreenPoint();
+    const disp = screen.getDisplayNearestPoint(pt);
+    const wa = disp.workArea || disp.bounds; // prefer workArea if available
+    const x = Math.floor(wa.x + (wa.width  - width)  / 2);
+    const y = Math.floor(wa.y + (wa.height - height) / 2);
+    win.setBounds({ x, y, width, height }, false);
+  } catch (e) {
+    // Fallback: built-in center (may use primary display)
+    try { win.center(); } catch {}
+  }
+}
+
+
 function readClipboardImageRobust() {
   let img = clipboard.readImage();
   if (img && !img.isEmpty()) return img;
@@ -233,34 +259,75 @@ async function enforceMaxAndCleanup(items) {
 let overlayWin = null;
 function createOverlay() {
   if (overlayWin) return overlayWin;
+
+  const { width, height } = overlayWH(settingsStore.get('overlaySize')); // small/medium/large
   overlayWin = new BrowserWindow({
-    width: 900, height: 560, show: false, frame: false, transparent: true,
-    backgroundColor: '#00000000', resizable: false, alwaysOnTop: true, skipTaskbar: true, hasShadow: false,
+    width,
+    height,
+    useContentSize: true,               // <-- important for reliable downsizing
+    show: false,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false,
+      sandbox: false,
     },
   });
+
   overlayWin.on('closed', () => { overlayWin = null; });
   overlayWin.on('blur', () => { if (overlayWin) overlayWin.hide(); });
   overlayWin.loadFile('overlay.html');
+
+  // Center on first create, using the actual window outer size
+  try {
+    const [w, h] = overlayWin.getSize();
+    centerOverlayOnActiveDisplay(overlayWin, w, h);
+  } catch {}
+
   return overlayWin;
 }
+
 function showOverlay() {
   const win = createOverlay();
   if (!win) return;
 
-  // Remember where to paste back into *before* showing the overlay
-  captureActiveTarget();
+  // remember paste target before showing (keeps caret in the other app)
+  try { captureActiveTarget?.(); } catch {}
 
-  // Show WITHOUT taking focus (keeps caret in Notepad etc.)
-  if (!win.isVisible()) win.showInactive();
+  // Apply current CONTENT size every time, then re-center using OUTER size
+  try {
+    const { width: cw, height: ch } = overlayWH(settingsStore.get('overlaySize'));
+    win.setContentSize(cw, ch);                 // <-- downsizing-safe
+    const [w, h] = win.getSize();               // outer size after content resize
+    centerOverlayOnActiveDisplay(win, w, h);
+    console.log('[overlay:size]', {
+      overlaySize: settingsStore.get('overlaySize'),
+      content: { width: cw, height: ch },
+      window:  { width: w,  height: h  }
+    });
+  } catch (e) {
+    console.log('[overlay:size:error]', e?.message);
+  }
+
+  // Show without stealing focus
   try { win.setAlwaysOnTop(true, 'screen-saver'); } catch {}
+  if (!win.isVisible()) win.showInactive();
 
   win.webContents.send('overlay:show');
   win.webContents.send('overlay:anim', true);
-  console.log('[overlay] show (inactive)'); // DEBUG
+  console.log('[overlay] show (inactive)');
 }
+
+
+
 
 
 
@@ -391,6 +458,13 @@ function startClipboardPolling() {
 }
 
 /* ---------- IPC ---------- */
+ipcMain.handle('overlay:resize', (_e, size) => {
+  if (!overlayWin) return false;
+  const { width, height } = overlayWH(size || settingsStore.get('overlaySize'));
+  try { overlayWin.setSize(width, height, false); return true; }
+  catch (e) { console.log('overlay:resize:error', e.message); return false; }
+});
+
 ipcMain.handle('history:get', () => historyStore.get('items') || []);
 ipcMain.handle('history:clear', async () => {
   const items = historyStore.get('items') || [];
@@ -435,6 +509,7 @@ ipcMain.handle('settings:get', () => ({
   fuzzyThreshold: settingsStore.get('fuzzyThreshold'),
   autoPasteOnSelect: settingsStore.get('autoPasteOnSelect'),
   debugLogging: settingsStore.get('debugLogging'),
+  overlaySize: settingsStore.get('overlaySize'),
 }));
 ipcMain.handle('settings:save', async (_e, s) => {
   settingsStore.set('theme', s.theme === 'light' ? 'light' : 'dark');
@@ -446,7 +521,10 @@ ipcMain.handle('settings:save', async (_e, s) => {
   settingsStore.set('fuzzyThreshold', th);
   if (Object.prototype.hasOwnProperty.call(s, 'autoPasteOnSelect')) settingsStore.set('autoPasteOnSelect', !!s.autoPasteOnSelect);
   if (Object.prototype.hasOwnProperty.call(s, 'debugLogging')) settingsStore.set('debugLogging', !!s.debugLogging);
-
+  if (Object.prototype.hasOwnProperty.call(s, 'overlaySize')) {
+      const v = String(s.overlaySize || '').toLowerCase();
+      settingsStore.set('overlaySize', ['small','medium','large'].includes(v) ? v : 'large');
+    }
   registerHotkey();
 
   if (settingsStore.get('captureContext')) {
