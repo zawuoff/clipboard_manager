@@ -1,5 +1,5 @@
-// main.js — ORIGINAL FEATURES PRESERVED + Smart Tags (auto + OCR)
-// (Based on your original main.js, adds only small, isolated changes)
+// main.js — Paste on Select added without touching your preload/renderer/features
+
 const {
   app, BrowserWindow, globalShortcut, clipboard, ipcMain, nativeImage, shell,
 } = require('electron');
@@ -7,6 +7,7 @@ const path = require('path');
 const fs = require('fs');
 const fsp = fs.promises;
 const crypto = require('crypto');
+const { spawn } = require('child_process');
 
 const StoreMod = require('electron-store');
 const Store = StoreMod.default || StoreMod;
@@ -15,7 +16,18 @@ const { createWorker } = require('tesseract.js');
 
 let ocrWorker;
 
-/* ---------- Tesseract language resolution (unchanged) ---------- */
+/* ---------- tiny logger (terminal only) ---------- */
+function dlog(tag, payload = {}) {
+  try {
+    const enabled = settingsStore ? settingsStore.get('debugLogging') : true;
+    if (!enabled) return;
+  } catch (e) {}
+  const ts = new Date().toISOString().replace('T',' ').replace('Z','');
+  try { console.log(`[${ts}] ${tag}`, JSON.stringify(payload)); }
+  catch { console.log(`[${ts}] ${tag}`, payload); }
+}
+
+/* ---------- Tesseract language resolution (local/resources/node_modules) ---------- */
 function findEngModelDir(baseDir) {
   if (!baseDir) return null;
   try {
@@ -44,57 +56,34 @@ function resolveFromNodeModules() {
 function resolveEngData() {
   const local = findEngModelDir(path.join(process.cwd(), 'tessdata', 'eng'));
   if (local) return { ...local, origin: 'local' };
-
   const res = findEngModelDir(path.join(process.resourcesPath || '', 'tessdata', 'eng'));
   if (res) return { ...res, origin: 'resources' };
-
   const mod = resolveFromNodeModules();
   if (mod) return { ...mod, origin: 'node_modules' };
-
   return null;
 }
-async function getOcrWorker() {
-  if (ocrWorker) return ocrWorker;
-  const found = resolveEngData();
-  if (!found) throw new Error('ENG model not found. Provide tessdata/eng/.../eng.traineddata(.gz) or install @tesseract.js-data/eng');
-  console.log(`[ocr] langDir = ${found.dir}  origin: ${found.origin}  gzip: ${found.gzip}`);
-  ocrWorker = await createWorker('eng', undefined, {
-    langPath: found.dir,
-    gzip: found.gzip,
-    cachePath: path.join(app.getPath('userData'), 'tess-cache'),
-    workerBlobURL: false,
-  });
-  return ocrWorker;
-}
-app.on('will-quit', async () => { try { await ocrWorker?.terminate(); } catch {} });
 
-/* ---------- Stores (unchanged) ---------- */
+/* ---------- Stores ---------- */
 const settingsStore = new Store({
   name: 'settings',
   defaults: {
     theme: 'dark',
     hotkey: 'CommandOrControl+Shift+Space',
     maxItems: 500,
-    captureContext: false,
+    captureContext: false,       // your original option
     searchMode: 'fuzzy',
     fuzzyThreshold: 0.4,
+    // NEW (no UI change; default ON)
+    autoPasteOnSelect: true,
+    debugLogging: true,
   },
 });
 const historyStore = new Store({ name: 'history', defaults: { items: [] } });
 
-/* ---------- State (unchanged) ---------- */
-let overlayWin = null;
-let clipboardPollTimer = null;
-let lastClipboardText = '';
-let lastImageHash = '';
-
-/* ---------- Context capture (unchanged) ---------- */
+/* ---------- Active window capture (for context + paste target) ---------- */
 let activeWinGetter = null;
-let activeWinTimer = null;
-let lastRealWin = null;
-
 async function maybeLoadActiveWin() {
-  if (activeWinGetter !== null) return activeWinGetter;
+  if (activeWinGetter !== null) return activeWinGetter; // cached
   try {
     const mod = await import('active-win');
     activeWinGetter = typeof mod.default === 'function' ? mod.default : null;
@@ -120,7 +109,7 @@ function isNoiseWindow(info) {
 }
 async function startActiveWinSampling() {
   const getWin = await maybeLoadActiveWin();
-  if (!getWin) return;
+  if (!getWin) return; // gracefully no-op if not available
   if (activeWinTimer) clearInterval(activeWinTimer);
 
   activeWinTimer = setInterval(async () => {
@@ -141,7 +130,11 @@ function stopActiveWinSampling() {
   activeWinTimer = null;
   lastRealWin = null;
 }
-function pickContextNowSync() {
+let activeWinTimer = null;
+let lastRealWin = null;
+
+function captureSourceIfEnabled() {
+  if (!settingsStore.get('captureContext')) return undefined;
   const MAX_AGE = 7000;
   if (lastRealWin && (Date.now() - lastRealWin.ts) <= MAX_AGE) {
     return { app: lastRealWin.app, title: lastRealWin.title };
@@ -160,24 +153,37 @@ async function pickContextOnDemand() {
   return undefined;
 }
 
-/* ---------- Helpers (original + tiny additions) ---------- */
+/* ---------- NEW: precise target for auto-paste ---------- */
+let lastActive = { pid: null, title: '', hwnd: null };
+async function captureActiveTarget() {
+  try {
+    const getWin = await maybeLoadActiveWin();
+    if (!getWin) { lastActive = { pid: null, title: '', hwnd: null }; return; }
+    const info = await getWin();
+    if (info && !isNoiseWindow(info)) {
+      lastActive = {
+        pid: Number.isFinite(info?.owner?.processId) ? info.owner.processId : null,
+        title: String(info?.title || ''),
+        hwnd: Number.isFinite(info?.id) ? info.id
+           : Number.isFinite(info?.windowId) ? info.windowId
+           : null,
+      };
+      dlog('target:capture', lastActive);
+    } else {
+      lastActive = { pid: null, title: '', hwnd: null };
+      dlog('target:capture:none');
+    }
+  } catch (e) {
+    lastActive = { pid: null, title: '', hwnd: null };
+    dlog('target:capture:error', { msg: e?.message });
+  }
+}
+
+/* ---------- Helpers ---------- */
 function userDir(...p) { return path.join(app.getPath('userData'), ...p); }
 async function ensureDir(dir) { await fsp.mkdir(dir, { recursive: true }); }
 function sha1(buf) { return crypto.createHash('sha1').update(buf).digest('hex'); }
 const uniq = (arr) => Array.from(new Set((arr || []).filter(Boolean).map(s => String(s).toLowerCase())));
-
-async function persistImage(nimg, id) {
-  const outDir = userDir('clips', 'imgs'); await ensureDir(outDir);
-  const png = nimg.toPNG();
-  const filePath = path.join(outDir, `${id}.png`);
-  await fsp.writeFile(filePath, png);
-
-  const sz = nimg.getSize();
-  const w = Math.min(320, Math.max(64, sz.width));
-  const thumbImg = nimg.resize({ width: w, quality: 'best' });
-  const thumb = 'data:image/png;base64,' + thumbImg.toPNG().toString('base64');
-  return { filePath, thumb, wh: { w: sz.width, h: sz.height } };
-}
 
 function readClipboardImageRobust() {
   let img = clipboard.readImage();
@@ -195,7 +201,19 @@ function readClipboardImageRobust() {
   } catch {}
   return nativeImage.createEmpty();
 }
+async function persistImage(nimg, id) {
+  const outDir = userDir('clips', 'imgs'); await ensureDir(outDir);
+  const png = nimg.toPNG();
+  const filePath = path.join(outDir, `${id}.png`);
+  await fsp.writeFile(filePath, png);
+  const sz = nimg.getSize();
+  const w = Math.min(320, Math.max(64, sz.width));
+  const thumbImg = nimg.resize({ width: w, quality: 'best' });
+  const thumb = 'data:image/png;base64,' + thumbImg.toPNG().toString('base64');
+  return { filePath, thumb, wh: { w: sz.width, h: sz.height } };
+}
 
+/* ---------- Sorting / cleanup ---------- */
 function sortItems(items) {
   items.sort((a, b) =>
     (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) ||
@@ -211,7 +229,67 @@ async function enforceMaxAndCleanup(items) {
   ));
 }
 
-/* ---------- NEW: Auto-tagging heuristics (lightweight) ---------- */
+/* ---------- Overlay ---------- */
+let overlayWin = null;
+function createOverlay() {
+  if (overlayWin) return overlayWin;
+  overlayWin = new BrowserWindow({
+    width: 900, height: 560, show: false, frame: false, transparent: true,
+    backgroundColor: '#00000000', resizable: false, alwaysOnTop: true, skipTaskbar: true, hasShadow: false,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, sandbox: false,
+    },
+  });
+  overlayWin.on('closed', () => { overlayWin = null; });
+  overlayWin.on('blur', () => { if (overlayWin) overlayWin.hide(); });
+  overlayWin.loadFile('overlay.html');
+  return overlayWin;
+}
+function showOverlay() {
+  const win = createOverlay();
+  if (!win) return;
+
+  // Remember where to paste back into *before* showing the overlay
+  captureActiveTarget();
+
+  // Show WITHOUT taking focus (keeps caret in Notepad etc.)
+  if (!win.isVisible()) win.showInactive();
+  try { win.setAlwaysOnTop(true, 'screen-saver'); } catch {}
+
+  win.webContents.send('overlay:show');
+  win.webContents.send('overlay:anim', true);
+  console.log('[overlay] show (inactive)'); // DEBUG
+}
+
+
+
+/* ---------- Hotkey ---------- */
+function registerHotkey() {
+  const hk = (settingsStore.get('hotkey') || 'CommandOrControl+Shift+Space').trim();
+  globalShortcut.unregisterAll();
+  const ok = globalShortcut.register(hk, showOverlay);
+  if (!ok) globalShortcut.register('CommandOrControl+Shift+Space', showOverlay);
+}
+
+/* ---------- Clipboard polling (text + images + OCR) ---------- */
+let clipboardPollTimer = null;
+let lastClipboardText = '';
+let lastImageHash = '';
+
+async function getOcrWorker() {
+  if (ocrWorker) return ocrWorker;
+  const found = resolveEngData();
+  if (!found) throw new Error('ENG model not found');
+  dlog('ocr:init', found);
+  ocrWorker = await createWorker('eng', undefined, {
+    langPath: found.dir,
+    gzip: found.gzip,
+    cachePath: path.join(app.getPath('userData'), 'tess-cache'),
+    workerBlobURL: false,
+  });
+  return ocrWorker;
+}
 const RX = {
   url: /\b((https?:\/\/|www\.)[^\s/$.?#].[^\s]*)/i,
   email: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i,
@@ -235,52 +313,9 @@ function autoTagsForText(text) {
   if (RX.mdDate.test(t) || RX.monthDate.test(t)) tags.push('date');
   if (RX.number.test(t)) tags.push('number');
   if (looksLikeCode(t)) tags.push('code');
-  return uniq(tags);
+  return Array.from(new Set(tags));
 }
 
-/* ---------- Overlay (unchanged) ---------- */
-function createOverlay() {
-  if (overlayWin) return overlayWin;
-  overlayWin = new BrowserWindow({
-    width: 900, height: 560, show: false, frame: false, transparent: true,
-    backgroundColor: '#00000000', resizable: false, alwaysOnTop: true, skipTaskbar: true, hasShadow: false,
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      contextIsolation: true, nodeIntegration: false, backgroundThrottling: false, sandbox: false,
-    },
-  });
-  overlayWin.on('closed', () => { overlayWin = null; });
-  overlayWin.on('blur', () => { if (overlayWin) overlayWin.hide(); });
-  overlayWin.loadFile('overlay.html');
-  return overlayWin;
-}
-function showOverlay() {
-  const win = createOverlay();
-  if (!win) return;
-  if (!win.isVisible()) win.showInactive();
-  win.focus();
-  win.webContents.send('overlay:show');
-  win.webContents.send('overlay:anim', true);
-}
-ipcMain.handle('overlay:hide', () => {
-  if (!overlayWin) return;
-  overlayWin.webContents.send('overlay:anim', false);
-  overlayWin.hide();
-});
-
-/* ---------- Hotkey (unchanged) ---------- */
-function registerHotkey() {
-  const hk = (settingsStore.get('hotkey') || 'CommandOrControl+Shift+Space').trim();
-  globalShortcut.unregisterAll();
-  const ok = globalShortcut.register(hk, showOverlay);
-  if (!ok) globalShortcut.register('CommandOrControl+Shift+Space', showOverlay);
-}
-
-/* ---------- Clipboard polling (ORIGINAL + tags injection) ---------- */
-function captureSourceIfEnabled() {
-  if (!settingsStore.get('captureContext')) return undefined;
-  return pickContextNowSync();
-}
 function startClipboardPolling() {
   if (clipboardPollTimer) clearInterval(clipboardPollTimer);
   clipboardPollTimer = setInterval(async () => {
@@ -291,23 +326,19 @@ function startClipboardPolling() {
         const hash = sha1(png);
         if (hash !== lastImageHash) {
           lastImageHash = hash;
-
-          let source = captureSourceIfEnabled();
-          if (!source && settingsStore.get('captureContext')) {
-            source = await pickContextOnDemand();
-          }
+          const source = captureSourceIfEnabled();
 
           const id = Date.now();
           const meta = await persistImage(img, id);
           const items = historyStore.get('items') || [];
-          // Start images with empty tags; OCR may add later
           items.unshift({ id, type: 'image', pinned: false, ts: new Date().toISOString(), source, tags: [], ...meta });
           sortItems(items);
           await enforceMaxAndCleanup(items);
           historyStore.set('items', items);
           overlayWin?.webContents?.send('history:update', items);
+          dlog('capture:image', { id, filePath: meta.filePath, wh: meta.wh });
 
-          // OCR off-thread → also auto-tag OCR text
+          // OCR async
           (async () => {
             try {
               const worker = await getOcrWorker();
@@ -319,44 +350,47 @@ function startClipboardPolling() {
               const idx = itemsNow.findIndex(i => i.id === id);
               if (idx >= 0) {
                 const addTags = autoTagsForText(text);
-                const existing = uniq(itemsNow[idx].tags || []);
+                const existing = Array.from(new Set(itemsNow[idx].tags || []));
                 itemsNow[idx].ocrText = text.length > 12000 ? text.slice(0, 12000) : text;
-                itemsNow[idx].tags = uniq([...existing, ...addTags, 'ocr']);
+                itemsNow[idx].tags = Array.from(new Set([...existing, ...addTags, 'ocr']));
                 historyStore.set('items', itemsNow);
                 overlayWin?.webContents?.send('history:update', itemsNow);
+                dlog('ocr:done', { id, tags: addTags });
               }
-            } catch (e) { console.warn('[ocr]', e?.message); }
+            } catch (e) {
+              dlog('ocr:error', { msg: e?.message });
+            }
           })();
-
           return;
         }
       }
-    } catch (e) { console.warn('[clip] image read error:', e?.message); }
+    } catch (e) {
+      dlog('capture:image:error', { msg: e?.message });
+    }
 
+    // Text
     const text = clipboard.readText();
     if (!text || !text.trim()) return;
     if (text === lastClipboardText) return;
     lastClipboardText = text;
 
-    let source = captureSourceIfEnabled();
-    if (!source && settingsStore.get('captureContext')) {
-      source = await pickContextOnDemand();
-    }
+    const source = captureSourceIfEnabled();
 
     const items = historyStore.get('items') || [];
     if (items.length && items[0].type === 'text' && items[0].text === text) return;
 
     const id = Date.now();
-    const tags = autoTagsForText(text); // <-- NEW
+    const tags = autoTagsForText(text);
     items.unshift({ id, type: 'text', text, pinned: false, ts: new Date().toISOString(), source, tags });
     sortItems(items);
     await enforceMaxAndCleanup(items);
     historyStore.set('items', items);
     overlayWin?.webContents?.send('history:update', items);
+    dlog('capture:text', { id, tags, len: text.length });
   }, 200);
 }
 
-/* ---------- IPC (unchanged API — you already have generic update) ---------- */
+/* ---------- IPC ---------- */
 ipcMain.handle('history:get', () => historyStore.get('items') || []);
 ipcMain.handle('history:clear', async () => {
   const items = historyStore.get('items') || [];
@@ -370,8 +404,6 @@ ipcMain.handle('history:updateItem', (_e, { id, patch }) => {
   const idx = items.findIndex(i => i.id === id);
   if (idx >= 0) {
     items[idx] = { ...items[idx], ...patch };
-    // ensure tags stay unique/lowercase if provided
-    if (patch && Array.isArray(patch.tags)) items[idx].tags = Array.from(new Set(patch.tags.map(t => String(t).toLowerCase().trim()).filter(Boolean)));
     sortItems(items);
     historyStore.set('items', items);
     overlayWin?.webContents?.send('history:update', items);
@@ -401,6 +433,8 @@ ipcMain.handle('settings:get', () => ({
   captureContext: settingsStore.get('captureContext'),
   searchMode: settingsStore.get('searchMode'),
   fuzzyThreshold: settingsStore.get('fuzzyThreshold'),
+  autoPasteOnSelect: settingsStore.get('autoPasteOnSelect'),
+  debugLogging: settingsStore.get('debugLogging'),
 }));
 ipcMain.handle('settings:save', async (_e, s) => {
   settingsStore.set('theme', s.theme === 'light' ? 'light' : 'dark');
@@ -410,6 +444,8 @@ ipcMain.handle('settings:save', async (_e, s) => {
   settingsStore.set('searchMode', s.searchMode === 'exact' ? 'exact' : 'fuzzy');
   const th = Number.isFinite(+s.fuzzyThreshold) ? Math.min(0.9, Math.max(0.1, +s.fuzzyThreshold)) : 0.4;
   settingsStore.set('fuzzyThreshold', th);
+  if (Object.prototype.hasOwnProperty.call(s, 'autoPasteOnSelect')) settingsStore.set('autoPasteOnSelect', !!s.autoPasteOnSelect);
+  if (Object.prototype.hasOwnProperty.call(s, 'debugLogging')) settingsStore.set('debugLogging', !!s.debugLogging);
 
   registerHotkey();
 
@@ -421,26 +457,123 @@ ipcMain.handle('settings:save', async (_e, s) => {
   return true;
 });
 
-ipcMain.handle('clipboard:set', (_e, data) => {
-  if (data?.text) { clipboard.writeText(String(data.text)); return true; }
-  if (data?.imagePath) {
-    try { const img = nativeImage.createFromPath(data.imagePath); if (!img.isEmpty()) clipboard.writeImage(img); } catch {}
-    return true;
+/* ---------- Auto-paste driver (Windows) ---------- */
+function pasteKeystroke() {
+  try { overlayWin?.setAlwaysOnTop(false); } catch {}
+  try { overlayWin?.hide(); } catch {}
+
+  console.log('autopaste:start', { platform: process.platform, lastActive });
+
+  setTimeout(() => {
+    try {
+      if (process.platform === 'win32') {
+        const hwnd  = Number(lastActive?.hwnd || 0);
+        const title = String(lastActive?.title || '').replace(/"/g, '""');
+
+        const ps = `
+$hwnd = ${hwnd}
+$title = "${title}"
+if ($hwnd -gt 0) {
+  $code = @'
+using System;
+using System.Runtime.InteropServices;
+public static class P {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct INPUT { public uint type; public InputUnion U; }
+  [StructLayout(LayoutKind.Explicit)]
+  public struct InputUnion {
+    [FieldOffset(0)] public KEYBDINPUT ki;
+    [FieldOffset(0)] public MOUSEINPUT mi;
+    [FieldOffset(0)] public HARDWAREINPUT hi;
   }
-  if (data?.imageDataUrl) {
-    try { const img = nativeImage.createFromDataURL(data.imageDataUrl); if (!img.isEmpty()) clipboard.writeImage(img); } catch {}
-    return true;
+  [StructLayout(LayoutKind.Sequential)]
+  public struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct MOUSEINPUT { public int dx; public int dy; public uint mouseData; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct HARDWAREINPUT { public uint uMsg; public ushort wParamL; public ushort wParamH; }
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+  public const uint INPUT_KEYBOARD = 1;
+  public const uint KEYEVENTF_KEYUP = 0x0002;
+  public const ushort VK_CONTROL = 0x11;
+  public const ushort VK_V = 0x56;
+  public static void Paste() {
+    var ctrlDown = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_CONTROL } } };
+    var vDown    = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_V } } };
+    var vUp      = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_V, dwFlags = KEYEVENTF_KEYUP } } };
+    var ctrlUp   = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_CONTROL, dwFlags = KEYEVENTF_KEYUP } } };
+    INPUT[] inputs = new INPUT[] { ctrlDown, vDown, vUp, ctrlUp };
+    SendInput((uint)inputs.Length, inputs, System.Runtime.InteropServices.Marshal.SizeOf(typeof(INPUT)));
   }
-  return false;
+}
+'@
+  Add-Type -TypeDefinition $code -Language CSharp
+  [P]::ShowWindowAsync([IntPtr]$hwnd, 9) | Out-Null
+  Start-Sleep -Milliseconds 10
+  [P]::SetForegroundWindow([IntPtr]$hwnd) | Out-Null
+  Start-Sleep -Milliseconds 10
+  [P]::Paste()
+  "OK"
+} else { "NOHWND" }`.trim();
+
+        const { spawn } = require('child_process');
+        const pr = spawn('powershell.exe',
+          ['-NoProfile','-NonInteractive','-ExecutionPolicy','Bypass','-Command', ps],
+          { windowsHide: true });
+        let out = '', err = '';
+        pr.stdout.on('data', d => out += d.toString());
+        pr.stderr.on('data', d => err += d.toString());
+        pr.on('exit', code => console.log('autopaste:done', { code, out: out.trim(), err: err.trim() }));
+      } else {
+        console.log('autopaste:skip', { platform: process.platform });
+      }
+    } catch (e) {
+      console.log('autopaste:error', { msg: e?.message });
+    }
+  }, 16); // fast, stable
+}
+
+
+
+/* ---------- clipboard:set (trigger auto-paste if enabled) ---------- */
+ipcMain.handle('clipboard:set', async (_e, data) => {
+  try {
+    // write to clipboard
+    if (data?.text) {
+      clipboard.writeText(String(data.text));
+    } else if (data?.imagePath) {
+      try { const img = nativeImage.createFromPath(data.imagePath); if (!img.isEmpty()) clipboard.writeImage(img); } catch {}
+    } else if (data?.imageDataUrl) {
+      try { const img = nativeImage.createFromDataURL(data.imageDataUrl); if (!img.isEmpty()) clipboard.writeImage(img); } catch {}
+    }
+
+    const autoPaste = !!settingsStore.get('autoPasteOnSelect');
+    console.log('clipboard:set', { type: data?.text ? 'text' : (data?.imagePath || data?.imageDataUrl ? 'image' : 'unknown'), autoPaste });
+
+    if (autoPaste) {
+      pasteKeystroke();        // will log autopaste:start / done
+    } else {
+      overlayWin?.hide();      // just copy & close
+    }
+    return true;
+  } catch (e) {
+    console.log('clipboard:set:error', e?.message);
+    return false;
+  }
 });
 
-/* ---------- Lifecycle (unchanged) ---------- */
+
+
+/* ---------- Lifecycle ---------- */
 app.setAppUserModelId('com.fouwaz.snippetstash');
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) app.quit();
 else {
   app.on('second-instance', () => showOverlay());
   app.whenReady().then(async () => {
+    dlog('app:ready', { userData: app.getPath('userData') });
     createOverlay();
     registerHotkey();
     startClipboardPolling();

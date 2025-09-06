@@ -25,6 +25,7 @@ const themeEl = $('#theme');
 
 /* Tabs */
 const tabsEl = document.querySelector('.tabs');
+const autoPasteEl = document.getElementById('autoPasteOnSelect'); // (exists in settings UI)
 
 /* ---------- State ---------- */
 let items = [];
@@ -38,6 +39,7 @@ let cfg = {
   captureContext: false,
   searchMode: 'fuzzy',
   fuzzyThreshold: 0.4,
+  autoPasteOnSelect: true, // <— NEW default carried in memory (saved via settings)
 };
 let lastQuery = '';
 let lastMode  = 'fuzzy';
@@ -351,12 +353,13 @@ function chooseByRow(row) {
   const id = Number(row.dataset.id);
   const it = filtered.find(i => i.id === id);
   if (!it) return;
+  console.log('[choose] id=', id, 'type=', it.type); // DEBUG
   if (it.type === 'image') {
     window.api.setClipboard({ imagePath: it.filePath, imageDataUrl: it.thumb });
   } else {
     window.api.setClipboard({ text: it.text });
   }
-  window.api.hideOverlay();
+  // Let main decide to hide (esp. when auto-paste is on)
 }
 
 /* ---------- Keyboard (unchanged) ---------- */
@@ -373,7 +376,7 @@ document.addEventListener('keydown', (e) => {
 /* ---------- Search ---------- */
 searchEl.addEventListener('input', () => applyFilter());
 
-/* ---------- Tabs click (unchanged) ---------- */
+/* ---------- Tabs click (unchanged, but no focus steal when auto-paste is ON) ---------- */
 if (tabsEl) {
   tabsEl.addEventListener('click', (e) => {
     const btn = e.target.closest('.tab');
@@ -382,7 +385,11 @@ if (tabsEl) {
     localStorage.setItem('clip_tab', currentTab);
     updateTabsUI();
     applyFilter();
-    searchEl.focus();
+    // Avoid pulling focus to overlay search when auto-paste is ON
+    if (!cfg.autoPasteOnSelect) {
+      searchEl.focus();
+      searchEl.select();
+    }
   });
 }
 
@@ -497,7 +504,9 @@ async function boot() {
     cfg.captureContext = !!s.captureContext;
     cfg.searchMode = s.searchMode || cfg.searchMode;
     cfg.fuzzyThreshold = typeof s.fuzzyThreshold === 'number' ? s.fuzzyThreshold : cfg.fuzzyThreshold;
+    cfg.autoPasteOnSelect = !!s.autoPasteOnSelect; // <— NEW (keep in memory)
 
+    if (autoPasteEl) autoPasteEl.checked = cfg.autoPasteOnSelect; // <— NEW reflect in UI
     if (themeEl) themeEl.value = cfg.theme;
     applyTheme(cfg.theme);
 
@@ -506,7 +515,7 @@ async function boot() {
       hotkeyEl.value = displayLabel(cfg.hotkey);
     }
     if (maxItemsEl) maxItemsEl.value = cfg.maxItems;
-    if (captureEl) captureEl.checked = !!cfg.captureContext;
+    if (captureEl)  captureEl.checked = !!cfg.captureContext;
     if (searchModeEl)  searchModeEl.value  = cfg.searchMode;
     if (fuzzyThreshEl) fuzzyThreshEl.value = String(cfg.fuzzyThreshold);
   } catch {}
@@ -525,18 +534,26 @@ window.addEventListener('DOMContentLoaded', async () => {
     applyFilter();
   });
 
-  window.api.onOverlayShow(() => {
+  window.api.onOverlayShow(async () => {
     window.api.getHistory().then(h => { items = h || []; applyFilter(); });
     updateTabsUI();
     applyTheme(themeEl?.value || cfg.theme);
-    searchEl.focus();
-    searchEl.select();
+
+    // Only focus the search if auto-paste is OFF (to preserve caret in target app)
+    let s = {};
+    try { s = await window.api.getSettings(); } catch {}
+    const autoPaste = !!s?.autoPasteOnSelect;
+    console.log('[overlay] onOverlayShow autoPasteOnSelect=', autoPaste); // DEBUG
+    if (!autoPaste) {
+      searchEl.focus();
+      searchEl.select();
+    }
   });
 
   window.api.onOverlayAnim((visible) => overlayCard?.classList.toggle('show', !!visible));
 });
 
-/* ---------- Settings (unchanged) ---------- */
+/* ---------- Settings (unchanged, plus saving the new toggle) ---------- */
 clearBtn?.addEventListener('click', async () => {
   await window.api.clearHistory();
   items = [];
@@ -557,6 +574,7 @@ saveBtn?.addEventListener('click', async () => {
     captureContext: !!(captureEl?.checked ?? cfg.captureContext),
     searchMode: (searchModeEl?.value || cfg.searchMode),
     fuzzyThreshold: Number(fuzzyThreshEl?.value || cfg.fuzzyThreshold || 0.4),
+    autoPasteOnSelect: !!(autoPasteEl?.checked ?? cfg.autoPasteOnSelect), // <— NEW
   };
   cfg = { ...cfg, ...payload };
   try { await window.api.saveSettings(payload); } catch {}
@@ -564,7 +582,6 @@ saveBtn?.addEventListener('click', async () => {
   applyTheme(cfg.theme);
   applyFilter();
 });
-
 
 /* ---------- Settings flyout shim (safe, minimal) ---------- */
 (function () {
@@ -606,7 +623,6 @@ saveBtn?.addEventListener('click', async () => {
     }
   });
 })();
-
 
 /* ---------- FIX: settings flyout + robust tab wiring ---------- */
 (() => {
@@ -666,7 +682,9 @@ saveBtn?.addEventListener('click', async () => {
         localStorage.setItem('clip_tab', currentTab);
         updateTabsUI();
         applyFilter();
-        document.getElementById('search')?.focus();
+        if (!cfg.autoPasteOnSelect) { // <— NEW keep caret when ON
+          document.getElementById('search')?.focus();
+        }
       });
     }
   });
