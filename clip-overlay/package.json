@@ -1,6 +1,6 @@
 {
   "name": "ctrlc",
-  "version": "0.1.1",
+  "version": "0.2.1",
   "main": "main.js",
   "scripts": {
     "start": "electron .",
@@ -9,10 +9,12 @@
     "dev": "cross-env NODE_ENV=development electron ."
   },
   "build": {
-    "appId": "com.fouwaz.snippetstash",
-    "productName": "SnippetStash",
+    "appId": "com.fouwaz.ctrlc",
+    "productName": "CtrlC",              
     "files": [
-      "**/*"
+      "**/*",
+      "!dist/**",                        
+      "!out/**"
     ],
     "asar": true,
     "asarUnpack": [
@@ -24,22 +26,18 @@
       "buildResources": "build"
     },
     "extraResources": [
-      {
-        "from": "node_modules/@tesseract.js-data/eng",
-        "to": "tessdata/eng"
-      }
+      { "from": "node_modules/@tesseract.js-data/eng", "to": "tessdata/eng" }
     ],
     "win": {
-      "target": [
-        "nsis"
-      ],
+      "target": ["nsis"],
       "icon": "build/CtrlC-icon-v2.ico",
-      "artifactName": "${productName}-Setup-${version}.${ext}"
+      "artifactName": "CtrlC-${version}-${os}-${arch}-Setup.${ext}" 
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "perMachine": false
+      "perMachine": false,
+      "deleteAppDataOnUninstall": false
     }
   },
   "dependencies": {
@@ -51,7 +49,7 @@
   "devDependencies": {
     "cross-env": "^10.0.0",
     "electron": "^28.0.0",
-    "electron-builder": "^24.9.1",
+    "electron-builder": "^24.13.3",
     "electron-reload": "^2.0.0-alpha.1"
   }
 }

@@ -1,5 +1,5 @@
 // renderer.js — full file (original features preserved + Collections + Quick Actions + Paste Stack + Paste All)
-
+//abdul do you see this shit?
 const $ = (sel) => document.querySelector(sel);
 
 /* Core elements */

@@ -16,24 +16,6 @@ const { createWorker } = require('tesseract.js');
 
 let ocrWorker;
 
-// for development purposes
-// for development purposes
-if (process.env.NODE_ENV !== 'production') {
-  try {
-    require('electron-reload')(__dirname, {
-      electron: require('electron'),
-      hardResetMethod: 'exit',
-      ignore: /node_modules|[\/\\]\./,
-      // Watch these file types
-      awaitWriteFinish: {
-        stabilityThreshold: 100,
-        pollInterval: 100
-      }
-    });
-  } catch (e) {
-    console.log('electron-reload not available');
-  }
-}
 
 /* ---------- tiny logger (terminal only) ---------- */
 function dlog(tag, payload = {}) {
