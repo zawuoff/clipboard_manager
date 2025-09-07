@@ -493,3 +493,37 @@ html, body { background: transparent !important; }
 }
 
 .tabs.dragging{ cursor: grabbing; }
+
+
+/* === App-wide icon styling === */
+:root{
+  --icon-size: 18px;           /* SVG size */
+  --icon: #cbd5e1;             /* default */
+  --icon-muted: #94a3b8;
+  --icon-active: #fbbf24;      /* pin/star on state */
+}
+[data-theme="light"]{
+  --icon: #334155;
+  --icon-muted: #64748b;
+  --icon-active: #d97706;
+}
+
+.icon-btn{
+  width: 28px; height: 28px;
+  display:inline-flex; align-items:center; justify-content:center;
+  padding:0; margin-left:6px;
+  border-radius:8px; border:1px solid transparent;
+  background:transparent; color:var(--icon);
+  outline: none; opacity:.95;
+}
+.meta .icon-btn:first-child{ margin-left:0; }
+
+.icon-btn:hover{ background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.08); opacity:1; }
+.icon-btn:active{ transform:translateY(0.5px); }
+.icon-btn:focus-visible{ outline:2px solid #3b82f6; outline-offset:2px; }
+
+.icon{ width:var(--icon-size); height:var(--icon-size); display:block; }
+.icon.stroke{ fill:none; stroke:currentColor; stroke-width:2; stroke-linecap:round; stroke-linejoin:round; }
+.icon.fill{ fill: currentColor; }
+
+.icon-btn.is-active{ color:var(--icon-active); }

@@ -192,6 +192,106 @@ function enableTabsOverflowUX() {
   });
 }
 
+function extractEmail(text='') {
+  const m = String(text).match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
+  return m ? m[0] : null;
+}
+function extractCoords(text='') {
+  const m = String(text).match(/\b-?\d{1,2}\.\d+,\s*-?\d{1,3}\.\d+\b/);
+  return m ? m[0] : null;
+}
+function looksLikeAddress(text='') {
+  const t = String(text);
+  if (extractCoords(t)) return t;
+  const streetRe = /\b\d{1,6}\s+[A-Za-z0-9.\- ]+\s+(?:st|street|ave|avenue|rd|road|blvd|boulevard|ln|lane|dr|drive|ct|court|pl|place|way|pkwy|parkway|hwy|highway)\b/i;
+  return streetRe.test(t) ? t : null;
+}
+function cleanPlainText(s='') {
+  return String(s)
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')   // zero-width chars
+    .replace(/\u00A0/g, ' ')                 // nbsp → space
+    .replace(/\s+/g, ' ')                    // collapse whitespace
+    .trim();
+}
+
+function buildQuickActionsHTML(it) {
+  if (it.type !== 'text') return '';
+  const t = String(it.text || '').trim();
+  const btns = [];
+
+  // NOTE: URL action already exists in your UI; we don't add another here.
+
+  const email = extractEmail(t);
+  if (email) btns.push(
+    `<button class="icon-btn qa-email" data-id="${it.id}" title="Compose email">${svg('mail')}</button>`
+  );
+
+  const addr = looksLikeAddress(t);
+  if (addr && !isUrlItem(it)) btns.push(
+    `<button class="icon-btn qa-map" data-id="${it.id}" title="Open in Maps">${svg('map')}</button>`
+  );
+
+  if (t && !isUrlItem(it)) btns.push(
+    `<button class="icon-btn qa-clean" data-id="${it.id}" title="Copy clean">${svg('copy')}</button>`
+  );
+
+  return btns.join('');
+}
+
+
+// SVG icons (inline, theme-aware via currentColor)
+function svg(name, opts = {}) {
+  const filled = !!opts.filled;
+  switch (name) {
+    case 'external': // open in browser
+      return `<svg class="icon stroke" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M18 13v6a3 3 0 0 1-3 3H6a3 3 0 0 1-3-3V9a3 3 0 0 1 3-3h6"/>
+        <path d="M15 3h6v6"/><path d="M21 3L10 14"/>
+      </svg>`;
+    case 'trash':
+      return `<svg class="icon stroke" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 6h18"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/>
+        <path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/>
+      </svg>`;
+    case 'folder':
+      return `<svg class="icon stroke" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 7a2 2 0 0 1 2-2h4l2 3h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z"/>
+      </svg>`;
+    case 'pencil':
+      return `<svg class="icon stroke" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M3 21l3-1 12-12-2-2L4 18l-1 3z"/><path d="M14 4l2 2"/>
+      </svg>`;
+    case 'star':
+      return filled
+        ? `<svg class="icon fill" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 17.27 18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/>
+          </svg>`
+        : `<svg class="icon stroke" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 17.25 18.18 21 16.54 14 22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24 7.45 14 5.82 21 12 17.25z"/>
+          </svg>`;
+    case 'mail':
+      return `<svg class="icon stroke" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>
+      </svg>`;
+    case 'map':
+      return `<svg class="icon stroke" viewBox="0 0 24 24" aria-hidden="true">
+        <path d="M12 22s7-4.35 7-10a7 7 0 1 0-14 0c0 5.65 7 10 7 10z"/><circle cx="12" cy="11" r="3"/>
+      </svg>`;
+    case 'copy':
+      return `<svg class="icon stroke" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="9" y="9" width="12" height="12" rx="2"/><rect x="3" y="3" width="12" height="12" rx="2"/>
+      </svg>`;
+
+    default: return '';
+  }
+}
+// Uniform icon button HTML
+function iconBtn(cls, iconName, title, active=false){
+  return `<button class="icon-btn ${cls} ${active?'is-active':''}"
+                 title="${escapeHTML(title)}" aria-label="${escapeHTML(title)}">
+            ${svg(iconName, { filled: active })}
+          </button>`;
+}
 
 
 
@@ -291,51 +391,63 @@ function render(list = []) {
     li.dataset.id = it.id;
 
     if (it.type === 'image') {
-      const dims = it.wh ? ` (${it.wh.w}×${it.wh.h})` : '';
-      const ctx = it.source ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}` : '';
-      const ocrFull = (it.ocrText || '').trim();
-      const ocrPreview = ocrFull ? ocrFull.slice(0, 120) : '';
-      const pos = textNeedle && ocrPreview ? fuzzyMatch(ocrPreview, textNeedle).pos : new Set();
-      const ocrHTML = ocrPreview
-        ? `<div class="ocr-preview">${renderWithHighlights(ocrPreview, pos)}${ocrFull.length>120?'…':''}</div>`
-        : '';
+  const dims = it.wh ? ` (${it.wh.w}×${it.wh.h})` : '';
+  const ctx = it.source ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}` : '';
 
-      li.innerHTML = `
-        <div class="thumbwrap">
-          <img class="thumb" src="${it.thumb}" alt="Clipboard image${dims}" />
-        </div>
-        <div class="cell">
-          <div class="primary">Image${dims}</div>
-          ${ocrHTML}
-          <div class="tags"></div>
-          <div class="meta">
-            ${new Date(it.ts || Date.now()).toLocaleString()}${ctx}
-            <button class="pin-btn" data-id="${it.id}" title="${it.pinned ? 'Unpin' : 'Pin'}">${it.pinned ? '⭐' : '☆'}</button>
-            <button class="col-btn" data-id="${it.id}" title="Add/remove in collections">📁</button> <!-- NEW -->
-            <button class="del-btn" data-id="${it.id}" title="Delete">🗑</button>
-          </div>
-        </div>
-      `;
-    } else {
-      const ctx = it.source ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}` : '';
-      const rawPrimary = trimOneLine(it.text || '');
-      const pos = textNeedle ? fuzzyMatch(rawPrimary, textNeedle).pos : new Set();
-      const primaryHTML = renderWithHighlights(rawPrimary, pos);
-      const openBtnHTML = isUrlItem(it)
-        ? `<button class="open-btn" data-id="${it.id}" title="Open in browser">↗</button>` : '';
+  const ocrFull = (it.ocrText || '').trim();
+  const ocrPreview = ocrFull ? ocrFull.slice(0, 120) : '';
+  const qobj = parseQuery((searchEl?.value || '').trim());
+  const textNeedle = qobj.text.join(' ');
+  const pos = textNeedle && ocrPreview ? fuzzyMatch(ocrPreview, textNeedle).pos : new Set();
+  const ocrHTML = ocrPreview
+    ? `<div class="ocr-preview">${renderWithHighlights(ocrPreview, pos)}${ocrFull.length>120?'…':''}</div>`
+    : '';
 
-      li.innerHTML = `
-        <div class="primary">${primaryHTML}</div>
-        <div class="tags"></div>
-        <div class="meta">
-          ${new Date(it.ts || Date.now()).toLocaleString()}${ctx}
-          <button class="pin-btn" data-id="${it.id}" title="${it.pinned ? 'Unpin' : 'Pin'}">${it.pinned ? '⭐' : '☆'}</button>
-          ${openBtnHTML}
-          <button class="col-btn" data-id="${it.id}" title="Add/remove in collections">📁</button> <!-- NEW -->
-          <button class="del-btn" data-id="${it.id}" title="Delete">🗑</button>
-        </div>
-      `;
-    }
+  const metaHTML = `
+    ${new Date(it.ts || Date.now()).toLocaleString()}${ctx}
+    ${iconBtn('pin-btn', 'star', it.pinned ? 'Unpin' : 'Pin', it.pinned)}
+    ${iconBtn('col-btn', 'folder', 'Add/remove in collections')}
+    ${iconBtn('del-btn', 'trash', 'Delete')}
+  `;
+
+  li.innerHTML = `
+    <div class="thumbwrap">
+      <img class="thumb" src="${it.thumb}" alt="Clipboard image${dims}" />
+    </div>
+    <div class="cell">
+      <div class="primary">Image${dims}</div>
+      ${ocrHTML}
+      <div class="tags"></div>
+      <div class="meta">${metaHTML}</div>
+    </div>
+  `;
+} else {
+  const ctx = it.source ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}` : '';
+  const rawPrimary = trimOneLine(it.text || '');
+  const qobj = parseQuery((searchEl?.value || '').trim());
+  const textNeedle = qobj.text.join(' ');
+  const pos = textNeedle ? fuzzyMatch(rawPrimary, textNeedle).pos : new Set();
+  const primaryHTML = renderWithHighlights(rawPrimary, pos);
+
+  // NEW: quick actions
+  const qaHTML = buildQuickActionsHTML(it);
+
+  const metaHTML = `
+    ${new Date(it.ts || Date.now()).toLocaleString()}${ctx}
+    ${iconBtn('pin-btn', 'star', it.pinned ? 'Unpin' : 'Pin', it.pinned)}
+    ${isUrlItem(it) ? iconBtn('open-btn', 'external', 'Open in browser') : ''}
+    ${qaHTML}
+    ${iconBtn('col-btn', 'folder', 'Add/remove in collections')}
+    ${iconBtn('del-btn', 'trash', 'Delete')}
+  `;
+
+  li.innerHTML = `
+    <div class="primary">${primaryHTML}</div>
+    <div class="tags"></div>
+    <div class="meta">${metaHTML}</div>
+  `;
+}
+
 
     // Tags UI
     const wrap = li.querySelector('.tags');
@@ -546,6 +658,41 @@ resultsEl?.addEventListener('click', async (e) => {
     return;
   }
 
+  // Quick Action: Compose Email
+const qaEmail = e.target.closest('.qa-email');
+if (qaEmail) {
+  e.preventDefault(); e.stopPropagation();
+  const id = Number(qaEmail.dataset.id);
+  const it = items.find(i => i.id === id);
+  const email = extractEmail(it?.text || '');
+  if (email) window.api.openUrl(`mailto:${encodeURIComponent(email)}`);
+  return;
+}
+
+// Quick Action: Open in Maps
+const qaMap = e.target.closest('.qa-map');
+if (qaMap) {
+  e.preventDefault(); e.stopPropagation();
+  const id = Number(qaMap.dataset.id);
+  const it = items.find(i => i.id === id);
+  const t = String(it?.text || '');
+  const q = extractCoords(t) || looksLikeAddress(t) || t.trim();
+  if (q) window.api.openUrl(`https://www.google.com/maps/search/?q=${encodeURIComponent(q)}`);
+  return;
+}
+
+// Quick Action: Copy Clean (then main will auto-paste if enabled)
+const qaClean = e.target.closest('.qa-clean');
+if (qaClean) {
+  e.preventDefault(); e.stopPropagation();
+  const id = Number(qaClean.dataset.id);
+  const it = items.find(i => i.id === id);
+  const cleaned = cleanPlainText(it?.text || '');
+  if (cleaned) window.api.setClipboard({ text: cleaned });
+  return;
+}
+
+
   // Row choose (paste/select)
   const row = e.target.closest('li.row');
   if (row) chooseByRow(row);
@@ -604,10 +751,15 @@ function renderCollectionsHub() {
       <div class="primary">📂 ${escapeHTML(c.name)}</div>
       <div class="meta">
         <span>${count} item${count===1?'':'s'}</span>
-        <button class="col-rename" data-id="${c.id}" title="Rename">✏️</button>
-        <button class="col-delete" data-id="${c.id}" title="Delete">🗑</button>
+        <button class="icon-btn col-rename" data-id="${c.id}" title="Rename" aria-label="Rename">
+          ${svg('pencil')}
+        </button>
+        <button class="icon-btn col-delete" data-id="${c.id}" title="Delete" aria-label="Delete">
+          ${svg('trash')}
+        </button>
       </div>
     `;
+
 
     li.addEventListener('click', (e) => {
       if (e.target.closest('.col-rename') || e.target.closest('.col-delete')) return;

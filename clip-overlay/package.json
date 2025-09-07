@@ -6,7 +6,7 @@
     "start": "electron .",
     "pack": "electron-builder --dir",
     "dist": "electron-builder --win nsis",
-    "dev": "nodemon --exec electron ."
+    "dev": "cross-env NODE_ENV=development electron ."
   },
   "build": {
     "appId": "com.fouwaz.snippetstash",
@@ -33,7 +33,7 @@
       "target": [
         "nsis"
       ],
-       "icon": "build/CtrlC-icon-v2.ico",
+      "icon": "build/CtrlC-icon-v2.ico",
       "artifactName": "${productName}-Setup-${version}.${ext}"
     },
     "nsis": {
@@ -49,7 +49,9 @@
     "tesseract.js": "^6.0.0"
   },
   "devDependencies": {
+    "cross-env": "^10.0.0",
     "electron": "^28.0.0",
-    "electron-builder": "^24.9.1"
+    "electron-builder": "^24.9.1",
+    "electron-reload": "^2.0.0-alpha.1"
   }
 }
