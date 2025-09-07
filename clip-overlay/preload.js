@@ -110,5 +110,17 @@ contextBridge.exposeInMainWorld('api', {
 
   //resize
   resizeOverlay: (size) => ipcRenderer.invoke('overlay:resize', size),
+  
+  // Collections
+  collections: {
+  list: () => ipcRenderer.invoke('collections:list'),
+  create: (name) => ipcRenderer.invoke('collections:create', name),
+  rename: (id, name) => ipcRenderer.invoke('collections:rename', { id, name }),
+  remove: (id) => ipcRenderer.invoke('collections:delete', id),
+  addItems: (id, itemIds) => ipcRenderer.invoke('collections:addItems', { id, itemIds }),
+  removeItems: (id, itemIds) => ipcRenderer.invoke('collections:removeItems', { id, itemIds }),
+  onUpdate: (fn) => ipcRenderer.on('collections:update', (_e, list) => fn(list)),
+},
+
 
 });

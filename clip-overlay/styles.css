@@ -447,3 +447,49 @@ html, body { background: transparent !important; }
 /* Pin settings to overlay’s right side (minimal, safe) */
 .overlay { position: relative; }
 #settings.sheet { position: absolute; right: 16px; left: auto; top: 56px; transform-origin: top right; }
+
+
+/* --- Tabs: fixed height, single line, overflow scroll --- */
+:root {
+  --tabs-h: 38px;        /* bar height */
+  --tab-pill-h: 28px;    /* button/pill height */
+}
+
+.tabs{
+  display:flex;
+  align-items:center;
+  gap:8px;
+  min-height: var(--tabs-h);
+  height: var(--tabs-h);
+  padding: 4px 0;
+  white-space: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;     /* Firefox */
+  -ms-overflow-style: none;  /* old Edge */
+  /* edge fade hint */
+  -webkit-mask-image: linear-gradient(to right,
+      rgba(0,0,0,0) 0, rgba(0,0,0,1) 16px,
+      rgba(0,0,0,1) calc(100% - 16px), rgba(0,0,0,0) 100%);
+          mask-image: linear-gradient(to right,
+      rgba(0,0,0,0) 0, rgba(0,0,0,1) 16px,
+      rgba(0,0,0,1) calc(100% - 16px), rgba(0,0,0,0) 100%);
+}
+.tabs::-webkit-scrollbar{ display:none; } /* Chrome/Electron */
+
+.tabs .tab{
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--tab-pill-h);
+  line-height: var(--tab-pill-h);
+  padding: 0 12px;
+  border-radius: 9999px;
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tabs.dragging{ cursor: grabbing; }

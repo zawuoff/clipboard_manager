@@ -1,5 +1,6 @@
-// renderer.js — ORIGINAL UI PRESERVED + Smart Tags & Filters
-// Tabs, fuzzy/exact search, URL open, OCR preview, keyboard nav: unchanged
+// renderer.js — full file
+// Preserves original features + adds: Paste-on-select toggle wiring,
+// Overlay size save/apply, and Collections (hub + dynamic tabs).
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -8,6 +9,7 @@ const overlayCard = $('.overlay');
 const resultsEl   = $('#results');
 const searchEl    = $('#search');
 const settingsEl  = $('#settings');
+const themeEl     = $('#theme');
 const hotkeyEl    = $('#hotkey');
 const maxItemsEl  = $('#maxItems');
 const captureEl   = $('#captureContext');
@@ -16,17 +18,14 @@ const settingsBtn = $('#settingsBtn');
 const saveBtn     = $('#saveSettings');
 const closeBtn    = $('#closeSettings');
 
-/* Search settings UI */
-const searchModeEl   = $('#searchMode');
-const fuzzyThreshEl  = $('#fuzzyThreshold');
+const searchModeEl  = $('#searchMode');
+const fuzzyThreshEl = $('#fuzzyThreshold');
 
-/* Theme setting UI */
-const themeEl = $('#theme');
+const autoPasteEl   = $('#autoPasteOnSelect'); // paste on select toggle
+const overlaySizeEl = $('#overlaySize');       // overlay size select
 
-/* Tabs */
+/* Tabs container */
 const tabsEl = document.querySelector('.tabs');
-const autoPasteEl = document.getElementById('autoPasteOnSelect'); // (exists in settings UI)
-const overlaySizeEl = document.getElementById('overlaySize'); // NEW
 
 /* ---------- State ---------- */
 let items = [];
@@ -40,12 +39,13 @@ let cfg = {
   captureContext: false,
   searchMode: 'fuzzy',
   fuzzyThreshold: 0.4,
-  autoPasteOnSelect: true, // <— NEW default carried in memory (saved via settings)
+  autoPasteOnSelect: true,
+  overlaySize: 'large',
 };
-let lastQuery = '';
-let lastMode  = 'fuzzy';
+// NEW: collections state
+let collections = [];
 
-/* ---------- Utils (original + helpers) ---------- */
+/* ---------- Utils ---------- */
 function escapeHTML(s='') {
   return String(s).replace(/[&<>"']/g,(m)=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[m]));
 }
@@ -66,7 +66,7 @@ function isUrlItem(it) {
 }
 const uniq = (arr) => Array.from(new Set((arr || []).filter(Boolean).map(s => String(s).toLowerCase())));
 
-/* ---------- Fuzzy matching (span density) ---------- */
+/* ---------- Fuzzy matching ---------- */
 function fuzzyMatch(hayRaw = '', qRaw = '') {
   const hay = String(hayRaw);
   const q   = String(qRaw);
@@ -107,8 +107,6 @@ function fuzzyMatch(hayRaw = '', qRaw = '') {
   const score = Math.max(0, Math.min(1, 0.6*density + 0.3*startBonus + 0.1*(1-gapPenalty)));
   return { score, pos };
 }
-
-/* Render helper for highlights */
 function renderWithHighlights(text = '', posSet = new Set()) {
   if (!posSet || !posSet.size) return escapeHTML(text);
   let html = '';
@@ -123,7 +121,80 @@ function renderWithHighlights(text = '', posSet = new Set()) {
   return html;
 }
 
-/* ---------- Sorting & rendering (original) ---------- */
+/* ---------- Search helpers ---------- */
+// Simple in-overlay text prompt (no external CSS)
+// Usage: const v = await openTextPrompt({ title, description, placeholder, value, okText });
+function openTextPrompt({ title = 'Input', description = '', placeholder = '', value = '', okText = 'Save', cancelText = 'Cancel' } = {}) {
+  return new Promise(resolve => {
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = `
+      position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:9999;
+      display:flex; align-items:center; justify-content:center;`;
+    const card = document.createElement('div');
+    card.style.cssText = `
+      width: min(520px, 92vw); background: var(--panel, #1f2937); color: var(--fg, #e5e7eb);
+      border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.35); padding:16px;`;
+    card.innerHTML = `
+      <div style="font-weight:600; font-size:16px; margin-bottom:6px;">${escapeHTML(title)}</div>
+      ${description ? `<div style="opacity:.8; font-size:12px; margin-bottom:10px;">${escapeHTML(description)}</div>` : ''}
+      <input id="__mini_prompt_input" type="text" placeholder="${escapeHTML(placeholder)}"
+             value="${escapeHTML(value)}"
+             style="width:100%; padding:10px 12px; font-size:14px; border-radius:8px;
+                    border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.06); color:inherit;" />
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:12px;">
+        <button id="__mini_prompt_cancel" style="padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,.12); background:transparent; color:inherit;">${escapeHTML(cancelText)}</button>
+        <button id="__mini_prompt_ok" style="padding:8px 12px; border-radius:8px; border:0; background:#3b82f6; color:white; font-weight:600;">${escapeHTML(okText)}</button>
+      </div>`;
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+
+    const input = card.querySelector('#__mini_prompt_input');
+    const btnOK = card.querySelector('#__mini_prompt_ok');
+    const btnCancel = card.querySelector('#__mini_prompt_cancel');
+
+    const done = (val) => { try { document.body.removeChild(backdrop); } catch {} ; resolve(val); };
+    btnOK.addEventListener('click', () => done(input.value.trim() || ''));
+    btnCancel.addEventListener('click', () => done(null));
+    backdrop.addEventListener('click', (e) => { if (e.target === backdrop) done(null); });
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); btnOK.click(); }
+      if (e.key === 'Escape') { e.preventDefault(); btnCancel.click(); }
+    });
+    setTimeout(() => input.focus({ preventScroll: true }), 0);
+  });
+}
+
+// Enable horizontal scroll for tabs (wheel to scroll, drag to pan)
+// Idempotent horizontal scroll/drag for tabs
+function enableTabsOverflowUX() {
+  const el = document.querySelector('.tabs');
+  if (!el || el.dataset.overflowWired === '1') return;
+  el.dataset.overflowWired = '1';
+
+  // Wheel vertically => scroll horizontally
+  el.addEventListener('wheel', (e) => {
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      el.scrollLeft += e.deltaY;
+      e.preventDefault();
+    }
+  }, { passive: false });
+
+  // Click-drag to pan
+  let down = false, startX = 0, startLeft = 0;
+  el.addEventListener('mousedown', (e) => {
+    down = true; startX = e.pageX; startLeft = el.scrollLeft;
+    el.classList.add('dragging');
+  });
+  window.addEventListener('mouseup', () => { down = false; el.classList.remove('dragging'); });
+  window.addEventListener('mousemove', (e) => {
+    if (!down) return;
+    el.scrollLeft = startLeft - (e.pageX - startX);
+  });
+}
+
+
+
+
 function sortCombined(arr) {
   arr.sort((a, b) =>
     (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0) ||
@@ -137,7 +208,6 @@ function sortByScoreThenDefault(arr) {
     new Date(b.ts) - new Date(a.ts)
   );
 }
-
 function baseSearchTextForItem(it) {
   if (it.type !== 'image') return String(it.text || '');
   const dims = it.wh ? `${it.wh.w}x${it.wh.h}` : '';
@@ -145,7 +215,7 @@ function baseSearchTextForItem(it) {
   return (it.ocrText && it.ocrText.trim()) ? it.ocrText : meta;
 }
 
-/* ---------- NEW: Query parsing & filters ---------- */
+/* Smart query: tag/type/has/pinned + free text */
 function parseQuery(q) {
   const out = { text: [], include: [], exclude: [], type: null, hasOCR: null, pinned: null };
   const parts = String(q || '').trim().split(/\s+/).filter(Boolean);
@@ -172,7 +242,7 @@ function itemPassesFilters(it, qobj) {
   return true;
 }
 
-/* ---------- Rendering (add tag pills under primary) ---------- */
+/* ---------- Tag pills ---------- */
 function tagPill(text, { removable = false, onRemove } = {}) {
   const pill = document.createElement('span');
   pill.className = 'tag';
@@ -209,10 +279,10 @@ async function removeTagForItem(it, tag) {
   applyFilter();
 }
 
+/* ---------- Rendering list ---------- */
 function render(list = []) {
   resultsEl.innerHTML = '';
-  const q = lastQuery;
-  const qobj = parseQuery(q);
+  const qobj = parseQuery((searchEl?.value || '').trim());
   const textNeedle = qobj.text.join(' ');
 
   list.forEach((it) => {
@@ -223,7 +293,6 @@ function render(list = []) {
     if (it.type === 'image') {
       const dims = it.wh ? ` (${it.wh.w}×${it.wh.h})` : '';
       const ctx = it.source ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}` : '';
-
       const ocrFull = (it.ocrText || '').trim();
       const ocrPreview = ocrFull ? ocrFull.slice(0, 120) : '';
       const pos = textNeedle && ocrPreview ? fuzzyMatch(ocrPreview, textNeedle).pos : new Set();
@@ -242,6 +311,7 @@ function render(list = []) {
           <div class="meta">
             ${new Date(it.ts || Date.now()).toLocaleString()}${ctx}
             <button class="pin-btn" data-id="${it.id}" title="${it.pinned ? 'Unpin' : 'Pin'}">${it.pinned ? '⭐' : '☆'}</button>
+            <button class="col-btn" data-id="${it.id}" title="Add/remove in collections">📁</button> <!-- NEW -->
             <button class="del-btn" data-id="${it.id}" title="Delete">🗑</button>
           </div>
         </div>
@@ -251,10 +321,9 @@ function render(list = []) {
       const rawPrimary = trimOneLine(it.text || '');
       const pos = textNeedle ? fuzzyMatch(rawPrimary, textNeedle).pos : new Set();
       const primaryHTML = renderWithHighlights(rawPrimary, pos);
-
       const openBtnHTML = isUrlItem(it)
-        ? `<button class="open-btn" data-id="${it.id}" title="Open in browser">↗</button>`
-        : '';
+        ? `<button class="open-btn" data-id="${it.id}" title="Open in browser">↗</button>` : '';
+
       li.innerHTML = `
         <div class="primary">${primaryHTML}</div>
         <div class="tags"></div>
@@ -262,12 +331,13 @@ function render(list = []) {
           ${new Date(it.ts || Date.now()).toLocaleString()}${ctx}
           <button class="pin-btn" data-id="${it.id}" title="${it.pinned ? 'Unpin' : 'Pin'}">${it.pinned ? '⭐' : '☆'}</button>
           ${openBtnHTML}
+          <button class="col-btn" data-id="${it.id}" title="Add/remove in collections">📁</button> <!-- NEW -->
           <button class="del-btn" data-id="${it.id}" title="Delete">🗑</button>
         </div>
       `;
     }
 
-    // Render tag pills
+    // Tags UI
     const wrap = li.querySelector('.tags');
     const tagList = uniq(it.tags || []);
     if (wrap) {
@@ -286,63 +356,91 @@ function render(list = []) {
   setSelected(Math.min(selectedIndex, Math.max(0, list.length - 1)));
 }
 
-/* ---------- Tabs UI (unchanged) ---------- */
-function updateTabsUI() {
+/* ---------- Tabs (with collections) ---------- */
+function rebuildTabs() { // NEW: replaces updateTabsUI
   if (!tabsEl) return;
+  tabsEl.innerHTML = `
+    <button class="tab" data-tab="recent">recent</button>
+    <button class="tab" data-tab="images">images</button>
+    <button class="tab" data-tab="urls">urls</button>
+    <button class="tab" data-tab="pinned">pinned</button>
+    <button class="tab" data-tab="collections">collections</button>
+  `;
+  // append user collections as dynamic tabs
+  (collections || []).forEach(c => {
+    const b = document.createElement('button');
+    b.className = 'tab';
+    b.dataset.tab = `col:${c.id}`;
+    b.textContent = c.name;
+    b.title = c.name;  
+    tabsEl.appendChild(b);
+  });
   Array.from(tabsEl.querySelectorAll('.tab')).forEach(btn => {
     btn.classList.toggle('active', (btn.dataset.tab || 'recent') === currentTab);
   });
+
+  enableTabsOverflowUX();
 }
 
-/* ---------- Filtering & search (extended) ---------- */
+/* ---------- Filter + Search ---------- */
 function applyFilter() {
-  const q = (searchEl.value || '').trim();
-  lastQuery = q;
-  lastMode  = (searchModeEl?.value || cfg.searchMode || 'fuzzy');
+  // Collections hub view
+  if (currentTab === 'collections') {
+    rebuildTabs();
+    renderCollectionsHub(); // NEW
+    return;
+  }
 
+  const q = (searchEl?.value || '').trim();
   const qobj = parseQuery(q);
 
   let scope = items.slice();
-  // Tabs first (original behavior)
+
+  // Default tabs
   if (currentTab === 'images') scope = scope.filter(i => i.type === 'image');
   if (currentTab === 'urls')   scope = scope.filter(i => i.type !== 'image' && isUrlItem(i));
   if (currentTab === 'pinned') scope = scope.filter(i => !!i.pinned);
 
-  // Then apply advanced filters (type/has:ocr/pinned/tag includes/excludes)
-  scope = scope.filter(it => itemPassesFilters(it, qobj));
-
-  // No text part? keep your default sort & render
-  if (qobj.text.length === 0) {
-    filtered = scope;
-    sortCombined(filtered);
-    selectedIndex = 0;
-    updateTabsUI();
-    return render(filtered);
+  // Collection tab: data-tab="col:<id>"
+  if (currentTab.startsWith('col:')) {
+    const colId = currentTab.slice(4);
+    const col = (collections || []).find(c => c.id === colId);
+    const colSet = new Set(col?.itemIds || []);
+    scope = scope.filter(i => colSet.has(i.id));
   }
 
-  // Text search part
-  if (lastMode === 'fuzzy') {
-    const thresh = Number(fuzzyThreshEl?.value || cfg.fuzzyThreshold || 0.4);
-    const needle = qobj.text.join(' ');
-    const matches = [];
-    for (const it of scope) {
-      const s = fuzzyMatch(baseSearchTextForItem(it), needle).score;
-      if (s >= thresh) matches.push({ ...it, _score: s });
+  // Advanced filters (type/has/pinned/tag)
+  scope = scope.filter(it => itemPassesFilters(it, qobj));
+
+  // Text search
+  if (qobj.text.length) {
+    const mode = (searchModeEl?.value || cfg.searchMode || 'fuzzy');
+    if (mode === 'fuzzy') {
+      const thresh = Number(fuzzyThreshEl?.value || cfg.fuzzyThreshold || 0.4);
+      const needle = qobj.text.join(' ');
+      const matches = [];
+      for (const it of scope) {
+        const s = fuzzyMatch(baseSearchTextForItem(it), needle).score;
+        if (s >= thresh) matches.push({ ...it, _score: s });
+      }
+      sortByScoreThenDefault(matches);
+      filtered = matches;
+    } else {
+      const needle = qobj.text.join(' ').toLowerCase();
+      filtered = scope.filter(it => String(baseSearchTextForItem(it)).toLowerCase().includes(needle));
+      sortCombined(filtered);
     }
-    sortByScoreThenDefault(matches);
-    filtered = matches;
   } else {
-    const needle = qobj.text.join(' ').toLowerCase();
-    filtered = scope.filter(it => String(baseSearchTextForItem(it)).toLowerCase().includes(needle));
+    filtered = scope;
     sortCombined(filtered);
   }
 
   selectedIndex = 0;
-  updateTabsUI();
+  rebuildTabs();
   render(filtered);
 }
 
-/* ---------- Selection & actions (unchanged) ---------- */
+/* ---------- Selection & actions ---------- */
 function setSelected(i) {
   selectedIndex = Math.max(0, Math.min((filtered.length - 1), i));
   Array.from(resultsEl.children).forEach((el, idx) => {
@@ -354,16 +452,16 @@ function chooseByRow(row) {
   const id = Number(row.dataset.id);
   const it = filtered.find(i => i.id === id);
   if (!it) return;
-  console.log('[choose] id=', id, 'type=', it.type); // DEBUG
+  console.log('[choose] id=', id, 'type=', it.type);
   if (it.type === 'image') {
     window.api.setClipboard({ imagePath: it.filePath, imageDataUrl: it.thumb });
   } else {
     window.api.setClipboard({ text: it.text });
   }
-  // Let main decide to hide (esp. when auto-paste is on)
+  // Main decides to paste & hide depending on setting
 }
 
-/* ---------- Keyboard (unchanged) ---------- */
+/* Keyboard */
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') { window.api.hideOverlay(); e.preventDefault(); return; }
   if (e.key === 'ArrowDown') { setSelected(selectedIndex + 1); e.preventDefault(); }
@@ -374,70 +472,248 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-/* ---------- Search ---------- */
-searchEl.addEventListener('input', () => applyFilter());
+/* Search input */
+searchEl?.addEventListener('input', () => applyFilter());
 
-/* ---------- Tabs click (unchanged, but no focus steal when auto-paste is ON) ---------- */
-if (tabsEl) {
-  tabsEl.addEventListener('click', (e) => {
-    const btn = e.target.closest('.tab');
-    if (!btn) return;
-    currentTab = btn.dataset.tab || 'recent';
-    localStorage.setItem('clip_tab', currentTab);
-    updateTabsUI();
-    applyFilter();
-    // Avoid pulling focus to overlay search when auto-paste is ON
-    if (!cfg.autoPasteOnSelect) {
-      searchEl.focus();
-      searchEl.select();
-    }
-  });
-}
+/* Tabs click */
+tabsEl?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab');
+  if (!btn) return;
+  currentTab = btn.dataset.tab || 'recent';
+  localStorage.setItem('clip_tab', currentTab);
+  rebuildTabs();
+  applyFilter();
+  if (!cfg.autoPasteOnSelect) { searchEl?.focus(); searchEl?.select(); }
+});
 
-/* ---------- Click delegation (unchanged actions) ---------- */
-resultsEl.addEventListener('click', async (e) => {
+/* Row click delegation */
+resultsEl?.addEventListener('click', async (e) => {
+  // Open URL
   const openBtn = e.target.closest('.open-btn');
   if (openBtn) {
     e.preventDefault(); e.stopPropagation();
-    const id = Number(openBtn.dataset.id);
-    const current = items.find(i => i.id === id);
-    const url = current ? extractUrlFromText(current.text) : null;
-    if (url) window.api.openUrl(url);
+    try {
+      const id = Number(openBtn.dataset.id);
+      const current = items.find(i => i.id === id);
+      const url = current ? extractUrlFromText(current.text) : null;
+      if (url) window.api.openUrl(url);
+    } catch (err) { console.error('[open-url] error', err); }
     return;
   }
 
+  // Pin
   const pinBtn = e.target.closest('.pin-btn');
   if (pinBtn) {
     e.preventDefault(); e.stopPropagation();
-    const id = Number(pinBtn.dataset.id);
-    const current = items.find(i => i.id === id);
-    if (!current) return;
-    await window.api.updateHistoryItem(id, { pinned: !current.pinned });
-    items = await window.api.getHistory();
-    applyFilter();
+    try {
+      const id = Number(pinBtn.dataset.id);
+      const current = items.find(i => i.id === id);
+      if (!current) return;
+      await window.api.updateHistoryItem(id, { pinned: !current.pinned });
+      items = await window.api.getHistory();
+      applyFilter();
+    } catch (err) { console.error('[pin] error', err); }
     return;
   }
 
+  // NEW: Collections button 📁
+  const colBtn = e.target.closest('.col-btn');
+  if (colBtn) {
+    e.preventDefault(); e.stopPropagation();
+    try {
+      const id = Number(colBtn.dataset.id);
+      const it = items.find(i => i.id === id);
+      if (!it) { console.warn('[collections] item not found for id', id); return; }
+      console.log('[collections] folder click on item', id);
+      await openCollectionsPromptForItem(it);
+    } catch (err) {
+      console.error('[collections] col-btn error', err);
+      alert('Collections action failed: ' + (err?.message || err));
+    }
+    return;
+  }
+
+  // Delete
   const delBtn = e.target.closest('.del-btn');
   if (delBtn) {
     e.preventDefault(); e.stopPropagation();
-    const id = Number(delBtn.dataset.id);
-    await window.api.deleteHistoryItem(id);
-    items = await window.api.getHistory();
-    applyFilter();
+    try {
+      const id = Number(delBtn.dataset.id);
+      await window.api.deleteHistoryItem(id);
+      items = await window.api.getHistory();
+      applyFilter();
+    } catch (err) { console.error('[delete] error', err); }
     return;
   }
 
+  // Row choose (paste/select)
   const row = e.target.closest('li.row');
   if (row) chooseByRow(row);
 });
 
-/* ---------- Click outside card closes (unchanged) ---------- */
+
+/* Click outside closes */
 document.addEventListener('mousedown', (e) => {
   if (!e.target.closest('.overlay')) window.api.hideOverlay();
 });
 
-/* ---------- Hotkey capture (unchanged) ---------- */
+/* ---------- Collections: hub & prompt ---------- */
+function renderCollectionsHub() {
+  resultsEl.innerHTML = '';
+
+  // Create new collection row
+  const newRow = document.createElement('li');
+  newRow.className = 'row';
+  newRow.innerHTML = `
+    <div class="primary"><strong>➕ New collection</strong></div>
+    <div class="meta"><span>Create a new collection</span></div>`;
+  newRow.addEventListener('click', async () => {
+    try {
+      const name = await openTextPrompt({
+        title: 'New collection',
+        placeholder: 'e.g. Research',
+        okText: 'Create'
+      });
+      if (!name) return;
+      if (!window.api?.collections?.create) {
+        alert('Collections API not available (preload missing?)');
+        return;
+      }
+      const created = await window.api.collections.create(name);
+      collections = await window.api.collections.list();
+      rebuildTabs();
+      if (created?.id) {
+        currentTab = `col:${created.id}`;
+        localStorage.setItem('clip_tab', currentTab);
+      }
+      applyFilter();
+    } catch (err) {
+      console.error('[collections] create error', err);
+      alert('Failed to create collection: ' + (err?.message || err));
+    }
+  });
+  resultsEl.appendChild(newRow);
+
+  // Existing collections
+  (collections || []).forEach(c => {
+    const count = (c.itemIds || []).length;
+    const li = document.createElement('li');
+    li.className = 'row';
+    li.dataset.colId = c.id;
+    li.innerHTML = `
+      <div class="primary">📂 ${escapeHTML(c.name)}</div>
+      <div class="meta">
+        <span>${count} item${count===1?'':'s'}</span>
+        <button class="col-rename" data-id="${c.id}" title="Rename">✏️</button>
+        <button class="col-delete" data-id="${c.id}" title="Delete">🗑</button>
+      </div>
+    `;
+
+    li.addEventListener('click', (e) => {
+      if (e.target.closest('.col-rename') || e.target.closest('.col-delete')) return;
+      currentTab = `col:${c.id}`;
+      localStorage.setItem('clip_tab', currentTab);
+      rebuildTabs();
+      applyFilter();
+    });
+
+    li.querySelector('.col-rename')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        const newName = await openTextPrompt({
+          title: 'Rename collection',
+          value: c.name,
+          okText: 'Rename'
+        });
+        if (!newName || newName === c.name) return;
+        await window.api.collections.rename(c.id, newName);
+        collections = await window.api.collections.list();
+        rebuildTabs();
+        renderCollectionsHub();
+      } catch (err) {
+        console.error('[collections] rename error', err);
+        alert('Rename failed: ' + (err?.message || err));
+      }
+    });
+
+    li.querySelector('.col-delete')?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        const confirmName = await openTextPrompt({
+          title: `Delete "${c.name}"?`,
+          description: 'Type DELETE to confirm (items remain in history).',
+          placeholder: 'DELETE',
+          okText: 'Delete'
+        });
+        if (confirmName !== 'DELETE') return;
+        await window.api.collections.remove(c.id);
+        collections = await window.api.collections.list();
+        rebuildTabs();
+        renderCollectionsHub();
+      } catch (err) {
+        console.error('[collections] delete error', err);
+        alert('Delete failed: ' + (err?.message || err));
+      }
+    });
+
+    resultsEl.appendChild(li);
+  });
+
+  selectedIndex = 0;
+}
+
+
+
+async function openCollectionsPromptForItem(it) {
+  const existing = (collections || [])
+    .filter(c => (c.itemIds || []).includes(it.id))
+    .map(c => c.name);
+
+  const val = await openTextPrompt({
+    title: 'Collections for this item',
+    description:
+      'Enter comma-separated names to ADD. Prefix a name with "-" to REMOVE.\n' +
+      'Example: Work, Ideas, -Drafts',
+    placeholder: 'Work, Ideas, -Drafts',
+    value: existing.join(', '),
+    okText: 'Apply'
+  });
+  if (val == null) return;
+
+  const tokens = val.split(',').map(s => s.trim()).filter(Boolean);
+  const toAddNames = [];
+  const toRemoveNames = [];
+  for (const t of tokens) {
+    if (t.startsWith('-')) toRemoveNames.push(t.slice(1).trim());
+    else toAddNames.push(t);
+  }
+
+  // Ensure add targets exist
+  const nameToId = new Map((collections || []).map(c => [c.name, c.id]));
+  for (const name of toAddNames) {
+    if (!nameToId.has(name)) {
+      const created = await window.api.collections.create(name);
+      nameToId.set(created.name, created.id);
+    }
+  }
+
+  // Apply changes
+  for (const name of toAddNames) {
+    const id = nameToId.get(name);
+    if (id) await window.api.collections.addItems(id, [it.id]);
+  }
+  for (const name of toRemoveNames) {
+    const id = nameToId.get(name);
+    if (id) await window.api.collections.removeItems(id, [it.id]);
+  }
+
+  // Refresh UI
+  collections = await window.api.collections.list();
+  rebuildTabs();
+  applyFilter();
+}
+
+/* ---------- Hotkey capture ---------- */
 function keyToElectronKey(e) {
   if (/^[a-zA-Z]$/.test(e.key)) return e.key.toUpperCase();
   if (/^[0-9]$/.test(e.key)) return e.key;
@@ -488,27 +764,19 @@ hotkeyEl?.addEventListener('keydown', (e) => {
   }
 });
 
-/* ---------- Theme (unchanged) ---------- */
+/* ---------- Theme ---------- */
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
 }
 themeEl?.addEventListener('change', () => applyTheme(themeEl.value));
 
-/* ---------- Boot (unchanged except rendering supports tags) ---------- */
+/* ---------- Boot ---------- */
 async function boot() {
   items = await window.api.getHistory().catch(() => []);
   try {
     const s = await window.api.getSettings();
-    cfg.theme = s.theme || cfg.theme;
-    cfg.hotkey = s.hotkey || cfg.hotkey;
-    cfg.maxItems = s.maxItems ?? cfg.maxItems;
-    cfg.captureContext = !!s.captureContext;
-    cfg.searchMode = s.searchMode || cfg.searchMode;
-    cfg.fuzzyThreshold = typeof s.fuzzyThreshold === 'number' ? s.fuzzyThreshold : cfg.fuzzyThreshold;
-    cfg.autoPasteOnSelect = !!s.autoPasteOnSelect; // <— NEW (keep in memory)
+    cfg = { ...cfg, ...s };
 
-    if (overlaySizeEl) overlaySizeEl.value = (s.overlaySize || 'large');
-    if (autoPasteEl) autoPasteEl.checked = cfg.autoPasteOnSelect; // <— NEW reflect in UI
     if (themeEl) themeEl.value = cfg.theme;
     applyTheme(cfg.theme);
 
@@ -520,10 +788,17 @@ async function boot() {
     if (captureEl)  captureEl.checked = !!cfg.captureContext;
     if (searchModeEl)  searchModeEl.value  = cfg.searchMode;
     if (fuzzyThreshEl) fuzzyThreshEl.value = String(cfg.fuzzyThreshold);
-  } catch {}
+    if (autoPasteEl)   autoPasteEl.checked = !!cfg.autoPasteOnSelect;
+    if (overlaySizeEl) overlaySizeEl.value = cfg.overlaySize || 'large';
+  } catch (e) {
+    console.warn('[renderer] getSettings failed:', e?.message);
+  }
+
+  // Load collections
+  try { collections = await window.api.collections.list(); } catch {}
 
   filtered = items.slice();
-  updateTabsUI();
+  rebuildTabs();
   render(filtered);
   setSelected(0);
 }
@@ -531,31 +806,46 @@ async function boot() {
 window.addEventListener('DOMContentLoaded', async () => {
   await boot();
 
-  window.api.onHistoryUpdate((list) => {
-    items = list || [];
+  enableTabsOverflowUX();   
+
+  // Sanity log so we know the IPC is wired
+  console.log('[collections] preload API present =',
+    !!(window.api && window.api.collections && window.api.collections.list));
+
+  // live updates
+  window.api.onHistoryUpdate((list) => { items = list || []; applyFilter(); });
+
+  // collections live updates
+  window.api.collections.onUpdate((list) => {
+    collections = list || [];
+    rebuildTabs();
+    if (currentTab.startsWith('col:')) {
+      const colId = currentTab.slice(4);
+      if (!collections.some(c => c.id === colId)) currentTab = 'collections';
+    }
     applyFilter();
   });
 
   window.api.onOverlayShow(async () => {
     window.api.getHistory().then(h => { items = h || []; applyFilter(); });
-    updateTabsUI();
+    rebuildTabs();
     applyTheme(themeEl?.value || cfg.theme);
 
-    // Only focus the search if auto-paste is OFF (to preserve caret in target app)
+    // Only focus the search if auto-paste is OFF (keep caret in target app)
     let s = {};
     try { s = await window.api.getSettings(); } catch {}
     const autoPaste = !!s?.autoPasteOnSelect;
-    console.log('[overlay] onOverlayShow autoPasteOnSelect=', autoPaste); // DEBUG
+    console.log('[overlay] onOverlayShow autoPasteOnSelect =', autoPaste);
     if (!autoPaste) {
-      searchEl.focus();
-      searchEl.select();
+      searchEl?.focus();
+      searchEl?.select();
     }
   });
 
   window.api.onOverlayAnim((visible) => overlayCard?.classList.toggle('show', !!visible));
 });
 
-/* ---------- Settings (unchanged, plus saving the new toggle) ---------- */
+/* ---------- Settings actions ---------- */
 clearBtn?.addEventListener('click', async () => {
   await window.api.clearHistory();
   items = [];
@@ -568,135 +858,37 @@ settingsBtn?.addEventListener('click', () => {
 closeBtn?.addEventListener('click', () => settingsEl?.classList.remove('open'));
 
 saveBtn?.addEventListener('click', async () => {
-  const pickedHotkey = hotkeyEl?.dataset.accelValue || cfg.hotkey;
   const payload = {
     theme: (themeEl?.value || cfg.theme),
-    hotkey: pickedHotkey,
+    hotkey: (hotkeyEl?.dataset?.accelValue || hotkeyEl?.value || cfg.hotkey || 'CommandOrControl+Shift+Space'),
     maxItems: Number(maxItemsEl?.value || cfg.maxItems || 500),
     captureContext: !!(captureEl?.checked ?? cfg.captureContext),
     searchMode: (searchModeEl?.value || cfg.searchMode),
     fuzzyThreshold: Number(fuzzyThreshEl?.value || cfg.fuzzyThreshold || 0.4),
-    autoPasteOnSelect: !!(autoPasteEl?.checked ?? cfg.autoPasteOnSelect), // <— NEW
-    overlaySize: (overlaySizeEl?.value || 'large'),
+    autoPasteOnSelect: !!(autoPasteEl?.checked ?? cfg.autoPasteOnSelect),
+    overlaySize: (overlaySizeEl?.value || cfg.overlaySize || 'large'),
   };
   cfg = { ...cfg, ...payload };
-  try { await window.api.saveSettings(payload); } catch {}
+  try {
+    await window.api.saveSettings(payload);
+    await window.api.resizeOverlay(payload.overlaySize); // apply size now
+  } catch {}
   settingsEl?.classList.remove('open');
   applyTheme(cfg.theme);
   applyFilter();
 });
 
-/* ---------- Settings flyout shim (safe, minimal) ---------- */
+/* ---------- Settings flyout & Esc handling (keeps top-right sheet UX) ---------- */
 (function () {
-  const settingsEl  = document.getElementById('settings');
-  const settingsBtn = document.getElementById('settingsBtn');
-  const saveBtn     = document.getElementById('saveSettings');
-  const closeBtn    = document.getElementById('closeSettings');
-
-  function openSettings()  { settingsEl && settingsEl.classList.add('open'); }
   function closeSettings() { settingsEl && settingsEl.classList.remove('open'); }
-  function toggleSettings(){ settingsEl && settingsEl.classList.toggle('open'); }
-
-  // Ensure panel is CLOSED on boot, even if HTML had 'open' by mistake
-  document.addEventListener('DOMContentLoaded', () => {
-    closeSettings();
-
-    settingsBtn && settingsBtn.addEventListener('click', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      toggleSettings();
-    });
-
-    // Close on Save/Close; your existing saveSettings logic (if any) still runs
-    saveBtn && saveBtn.addEventListener('click', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      closeSettings();
-    });
-
-    closeBtn && closeBtn.addEventListener('click', (e) => {
-      e.preventDefault(); e.stopPropagation();
-      closeSettings();
-    });
-  });
-
-  // Also allow Esc to close just the settings panel (without hiding overlay)
+  document.addEventListener('DOMContentLoaded', () => closeSettings());
+  saveBtn && saveBtn.addEventListener('click', (e) => { e.stopPropagation(); closeSettings(); });
+  closeBtn && closeBtn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); closeSettings(); });
   document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape' && settingsEl && settingsEl.classList.contains('open')) {
-      e.preventDefault();
-      closeSettings();
+      e.preventDefault(); closeSettings();
     }
   });
 })();
 
-/* ---------- FIX: settings flyout + robust tab wiring ---------- */
-(() => {
-  const settingsEl  = document.getElementById('settings');
-  const settingsBtn = document.getElementById('settingsBtn');
-  const saveBtn     = document.getElementById('saveSettings');
-  const closeBtn    = document.getElementById('closeSettings');
-  const tabsEl      = document.querySelector('.tabs');
-
-  function openSettings()  { settingsEl && settingsEl.classList.add('open'); }
-  function closeSettings() { settingsEl && settingsEl.classList.remove('open'); }
-
-  document.addEventListener('DOMContentLoaded', () => {
-    // Make it a top-right flyout (keeps your bottom-sheet CSS as fallback)
-    if (settingsEl) {
-      settingsEl.classList.add('flyout');     // enables the flyout override CSS
-      settingsEl.classList.remove('open');    // start closed
-    }
-
-    if (settingsBtn && !settingsBtn.dataset.wired) {
-      settingsBtn.dataset.wired = '1';
-      settingsBtn.addEventListener('click', (e) => {
-        e.preventDefault(); e.stopPropagation();
-        settingsEl.classList.toggle('open');
-        if (settingsEl.classList.contains('open')) {
-          // focus first control for immediate typing
-          settingsEl.querySelector('input,select,button,textarea')?.focus();
-        }
-      });
-    }
-
-    if (saveBtn && !saveBtn.dataset.wired) {
-      saveBtn.dataset.wired = '1';
-      saveBtn.addEventListener('click', (e) => {
-        // Your existing save handler still runs; this only guarantees close.
-        e.stopPropagation();
-        closeSettings();
-      });
-    }
-
-    if (closeBtn && !closeBtn.dataset.wired) {
-      closeBtn.dataset.wired = '1';
-      closeBtn.addEventListener('click', (e) => {
-        e.preventDefault(); e.stopPropagation();
-        closeSettings();
-      });
-    }
-
-    // Defensive re-bind of tabs (restores images/urls/pinned switching if lost)
-    if (tabsEl && !tabsEl.dataset.wired) {
-      tabsEl.dataset.wired = '1';
-      tabsEl.addEventListener('click', (e) => {
-        const btn = e.target.closest('.tab');
-        if (!btn) return;
-        // Uses the existing globals/functions in your file:
-        currentTab = btn.dataset.tab || 'recent';
-        localStorage.setItem('clip_tab', currentTab);
-        updateTabsUI();
-        applyFilter();
-        if (!cfg.autoPasteOnSelect) { // <— NEW keep caret when ON
-          document.getElementById('search')?.focus();
-        }
-      });
-    }
-  });
-
-  // Let Esc close just the settings (without hiding overlay)
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && settingsEl && settingsEl.classList.contains('open')) {
-      e.preventDefault();
-      closeSettings();
-    }
-  });
-})();
+/* ---------- END ---------- */

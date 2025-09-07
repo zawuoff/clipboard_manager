@@ -471,8 +471,16 @@ ipcMain.handle('history:clear', async () => {
   for (const it of items) if (it.type === 'image' && it.filePath) { try { await fsp.unlink(it.filePath); } catch {} }
   historyStore.set('items', []);
   overlayWin?.webContents?.send('history:update', []);
+
+  // clear itemIds from all collections
+  const list = getCollections();
+  for (const c of list) { c.itemIds = []; c.updatedAt = new Date().toISOString(); }
+  setCollections(list);
+  broadcastCollections();
+
   return true;
 });
+
 ipcMain.handle('history:updateItem', (_e, { id, patch }) => {
   const items = historyStore.get('items') || [];
   const idx = items.findIndex(i => i.id === id);
@@ -494,11 +502,97 @@ ipcMain.handle('delete-history-item', async (_e, id) => {
   const filtered = items.filter(i => i.id !== id);
   historyStore.set('items', filtered);
   overlayWin?.webContents?.send('history:update', filtered);
+
+  // remove from collections, if present
+  const list = getCollections();
+  let changed = false;
+  for (const c of list) {
+    const before = (c.itemIds || []).length;
+    c.itemIds = (c.itemIds || []).filter(x => x !== id);
+    if (c.itemIds.length !== before) { c.updatedAt = new Date().toISOString(); changed = true; }
+  }
+  if (changed) { setCollections(list); broadcastCollections(); }
+
   return true;
 });
+
 ipcMain.handle('open-url', async (_event, url) => {
   try { await shell.openExternal(url); return true; } catch { return false; }
 });
+
+// --- Collections store & IPC ---
+const collectionsStore = new Store({ name: 'collections', defaults: { list: [] } });
+
+function getCollections() { return collectionsStore.get('list') || []; }
+function setCollections(list) { collectionsStore.set('list', list); }
+
+function broadcastCollections() {
+  try { overlayWin?.webContents?.send('collections:update', getCollections()); } catch {}
+}
+
+ipcMain.handle('collections:list', () => getCollections());
+
+ipcMain.handle('collections:create', (_e, name) => {
+  const list = getCollections();
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+  const col = {
+    id,
+    name: String(name || 'New collection').trim() || 'New collection',
+    itemIds: [],
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+  list.push(col);
+  setCollections(list);
+  broadcastCollections();
+  return col;
+});
+
+ipcMain.handle('collections:rename', (_e, { id, name }) => {
+  const list = getCollections();
+  const col = list.find(c => c.id === id);
+  if (!col) return false;
+  col.name = String(name || col.name);
+  col.updatedAt = new Date().toISOString();
+  setCollections(list);
+  broadcastCollections();
+  return true;
+});
+
+ipcMain.handle('collections:delete', (_e, id) => {
+  let list = getCollections();
+  const before = list.length;
+  list = list.filter(c => c.id !== id);
+  setCollections(list);
+  broadcastCollections();
+  return list.length < before;
+});
+
+ipcMain.handle('collections:addItems', (_e, { id, itemIds }) => {
+  const list = getCollections();
+  const col = list.find(c => c.id === id);
+  if (!col) return false;
+  const s = new Set(col.itemIds || []);
+  (itemIds || []).forEach(x => s.add(x));
+  col.itemIds = Array.from(s);
+  col.updatedAt = new Date().toISOString();
+  setCollections(list);
+  broadcastCollections();
+  return true;
+});
+
+ipcMain.handle('collections:removeItems', (_e, { id, itemIds }) => {
+  const list = getCollections();
+  const col = list.find(c => c.id === id);
+  if (!col) return false;
+  const rem = new Set(itemIds || []);
+  col.itemIds = (col.itemIds || []).filter(x => !rem.has(x));
+  col.updatedAt = new Date().toISOString();
+  setCollections(list);
+  broadcastCollections();
+  return true;
+});
+
 
 ipcMain.handle('settings:get', () => ({
   theme: settingsStore.get('theme'),
