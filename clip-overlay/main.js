@@ -612,6 +612,73 @@ ipcMain.handle('collections:removeItems', (_e, { id, itemIds }) => {
   return true;
 });
 
+// --- Stack paste: always hide overlay, set clipboard, then paste ---
+ipcMain.handle('stack:pasteNext', async (_e, data) => {
+  const sleep = (ms) => new Promise(r => setTimeout(r, ms));
+  try {
+    console.log('[stack] pasteNext: incoming', {
+      hasText: !!data?.text,
+      hasImagePath: !!data?.imagePath,
+      hasImageDataUrl: !!data?.imageDataUrl
+    });
+
+    // 1) Hide overlay so target app regains focus
+    try {
+      if (overlayWin && overlayWin.isVisible()) {
+        console.log('[stack] pasteNext: hiding overlay for focus…');
+        overlayWin.hide();
+      }
+    } catch (e) { console.log('[stack] overlay hide warn:', e?.message); }
+
+    // Give Windows a moment to refocus the last active app
+    await sleep(120);
+
+    // 2) Set clipboard
+    if (data?.text) {
+      clipboard.writeText(String(data.text));
+      console.log('[stack] pasteNext: wrote TEXT len=', String(data.text).length);
+    } else if (data?.imagePath) {
+      try {
+        const img = nativeImage.createFromPath(data.imagePath);
+        if (!img.isEmpty()) {
+          clipboard.writeImage(img);
+          console.log('[stack] pasteNext: wrote IMAGE from path');
+        } else {
+          console.log('[stack] pasteNext: image from path was empty');
+        }
+      } catch (e) {
+        console.log('[stack] pasteNext: imagePath error', e?.message);
+      }
+    } else if (data?.imageDataUrl) {
+      try {
+        const img = nativeImage.createFromDataURL(data.imageDataUrl);
+        if (!img.isEmpty()) {
+          clipboard.writeImage(img);
+          console.log('[stack] pasteNext: wrote IMAGE from dataURL');
+        } else {
+          console.log('[stack] pasteNext: image from dataURL was empty');
+        }
+      } catch (e) {
+        console.log('[stack] pasteNext: dataURL error', e?.message);
+      }
+    }
+
+    // Tiny settle time before sending Ctrl+V
+    await sleep(40);
+
+    // 3) Paste keystroke (your existing function)
+    console.log('[stack] pasteNext: sending paste keystroke…');
+    pasteKeystroke();
+
+    return true;
+  } catch (e) {
+    console.log('[stack] pasteNext: ERROR', e?.message);
+    return false;
+  }
+});
+
+
+
 
 ipcMain.handle('settings:get', () => ({
   theme: settingsStore.get('theme'),

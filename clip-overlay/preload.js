@@ -110,7 +110,7 @@ contextBridge.exposeInMainWorld('api', {
 
   //resize
   resizeOverlay: (size) => ipcRenderer.invoke('overlay:resize', size),
-  
+
   // Collections
   collections: {
   list: () => ipcRenderer.invoke('collections:list'),
@@ -122,5 +122,9 @@ contextBridge.exposeInMainWorld('api', {
   onUpdate: (fn) => ipcRenderer.on('collections:update', (_e, list) => fn(list)),
 },
 
+// Stack
+stack: {
+  pasteNext: (data) => ipcRenderer.invoke('stack:pasteNext', data),
+},
 
 });
