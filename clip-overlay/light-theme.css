@@ -1,103 +1,131 @@
-/* All overrides are scoped so the dark theme remains 100% unchanged. */
+/* Light Theme Overrides */
+html[data-theme="light"] {
+  --primary: #78350f;         /* Warm brown */
+  --secondary: #451a03;       /* Deep brown */
+  --accent: #ea580c;          /* Bright orange */
+  --accent-hover: #dc2626;    /* Red-orange */
+  --success: #059669;         /* Forest green */
+  --surface: #fef7ed;         /* Warm off-white */
+  --surface-elevated: #fed7aa; /* Light warm */
+  --bg: rgba(254, 247, 237, 0.95);
+  --bg-soft: rgba(234, 88, 12, 0.06);
+  --text: #431407;            /* Dark warm brown */
+  --text-dim: #78350f;        /* Medium brown */
+  --text-muted: #a16207;      /* Warm muted */
+  --border: rgba(234, 88, 12, 0.2);
+  --border-subtle: rgba(234, 88, 12, 0.1);
+  --shadow: 0 25px 50px -12px rgba(69, 26, 3, 0.25);
+  --shadow-card: 0 4px 6px -1px rgba(69, 26, 3, 0.1), 0 2px 4px -1px rgba(69, 26, 3, 0.06);
+  --shadow-elevated: 0 10px 15px -3px rgba(69, 26, 3, 0.1), 0 4px 6px -2px rgba(69, 26, 3, 0.05);
+}
+
 html[data-theme="light"] body {
-  background: #F8FAFC; /* slate-50 */
-  color: #0B1220;      /* near-black for readability */
+  background: #f8fafc;
+  color: var(--text);
 }
 
-/* Overlay card & toolbar */
 html[data-theme="light"] .overlay {
-  background: rgba(255,255,255,0.92);
-  backdrop-filter: saturate(140%) blur(6px);
-  border: 1px solid #E5E7EB; /* gray-200 */
-  box-shadow: 0 10px 30px rgba(2,6,23,0.10);
+  background: var(--bg);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
 }
 
-html[data-theme="light"] .toolbar input#search {
-  background: #EEF2FF;           /* indigo-50 */
-  color: #0B1220;
-  border: 1px solid #C7D2FE;     /* indigo-200 */
-}
-html[data-theme="light"] .toolbar input#search::placeholder { color: #64748B; } /* slate-500 */
-
-html[data-theme="light"] .toolbar button {
-  background: #4F46E5;  /* indigo-600 */
-  color: #fff;
-  border: none;
-}
-html[data-theme="light"] .toolbar button:hover { filter: brightness(1.05); }
-
-/* Tabs */
-html[data-theme="light"] .tabs .tab {
-  background: #E0E7FF;  /* indigo-100 */
-  color: #1E1B4B;       /* indigo-950 */
-  border: 1px solid #C7D2FE;
-}
-html[data-theme="light"] .tabs .tab.active {
-  background: #4F46E5;  /* indigo-600 */
-  color: #fff;
-  border-color: #4F46E5;
+/* Sidebar in light theme */
+html[data-theme="light"] .sidebar {
+  background: linear-gradient(180deg, #fed7aa 0%, #fdba74 100%);
+  border-right: 1px solid var(--border);
 }
 
-/* List rows */
-html[data-theme="light"] .results .row {
-  background: #F3F4F6;          /* gray-100 */
-  border: 1px solid #E5E7EB;    /* gray-200 */
-  color: #0B1220;
-}
-html[data-theme="light"] .results .row .primary { color: #0B1220; }
-html[data-theme="light"] .results .row .meta { color: #475569; }     /* slate-600 */
-
-html[data-theme="light"] .results .row.selected {
-  background: #E0EAFF;          /* indigo-100/200 blend */
-  border-color: #A5B4FC;        /* indigo-300 */
+html[data-theme="light"] .sidebar-tab {
+  color: rgba(67, 20, 7, 0.8);
 }
 
-/* Buttons inside items */
-html[data-theme="light"] .results .row .meta button {
-  background: #E0E7FF;
-  color: #1E1B4B;
-  border: 1px solid #C7D2FE;
-}
-html[data-theme="light"] .results .row .meta button:hover {
-  filter: brightness(0.98);
+html[data-theme="light"] .sidebar-tab:hover {
+  background: rgba(234, 88, 12, 0.15);
+  color: var(--text);
+  transform: translateX(2px);
 }
 
-/* OCR preview text */
-html[data-theme="light"] .ocr-preview { color: #334155; } /* slate-700 */
+html[data-theme="light"] .sidebar-tab.active {
+  background: linear-gradient(135deg, #ea580c 0%, #f97316 100%);
+  color: white;
+  box-shadow: 0 4px 12px rgba(234, 88, 12, 0.3);
+  border: 1px solid rgba(249, 115, 22, 0.4);
+}
+
+/* Toolbar in light theme */
+html[data-theme="light"] .toolbar {
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+/* Results area */
+html[data-theme="light"] .results {
+  background: var(--surface-elevated);
+}
+
+/* Row states in light theme */
+html[data-theme="light"] .row:hover {
+  border-color: var(--accent);
+  background: rgba(253, 186, 116, 0.3);
+  box-shadow: 0 4px 8px rgba(234, 88, 12, 0.1);
+  transform: translateY(-1px);
+}
+
+html[data-theme="light"] .row.selected {
+  border-color: var(--accent);
+  box-shadow: 0 6px 16px rgba(234, 88, 12, 0.2);
+  background: rgba(253, 186, 116, 0.4);
+}
 
 /* Settings sheet */
 html[data-theme="light"] .sheet {
-  background: #FFFFFF;
-  color: #0B1220;
-  border: 1px solid #E5E7EB;
-  box-shadow: 0 16px 40px rgba(2,6,23,0.16);
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  box-shadow: 0 16px 40px rgba(69, 26, 3, 0.16);
+}
+
+/* Toolbar buttons in light theme */
+html[data-theme="light"] .toolbar button {
+  border: 1px solid rgba(234, 88, 12, 0.2);
+  background: rgba(234, 88, 12, 0.08);
+}
+
+html[data-theme="light"] .toolbar button:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(234, 88, 12, 0.2);
 }
 html[data-theme="light"] .sheet h2,
-html[data-theme="light"] .sheet h3 { color: #0B1220; }
+html[data-theme="light"] .sheet h3 { color: var(--text); }
 
 html[data-theme="light"] .sheet input[type="text"],
 html[data-theme="light"] .sheet input[type="number"],
 html[data-theme="light"] .sheet select {
-  background: #F8FAFC;     /* slate-50 */
-  color: #0B1220;
-  border: 1px solid #E2E8F0; /* slate-200 */
+  background: rgba(234, 88, 12, 0.08);
+  color: var(--text);
+  border: 1px solid var(--border);
 }
-html[data-theme="light"] .sheet input::placeholder { color: #64748B; }
+html[data-theme="light"] .sheet input::placeholder { color: var(--text-muted); }
 
 html[data-theme="light"] .sheet .actions button {
-  background: #4F46E5;  /* indigo-600 */
-  color: #fff;
+  background: var(--accent);
+  color: white;
   border: none;
 }
 html[data-theme="light"] .sheet .actions .ghost {
-  background: #E2E8F0;  /* slate-200 */
-  color: #0B1220;
-  border: none;
+  background: rgba(234, 88, 12, 0.1);
+  color: var(--text);
+  border: 1px solid var(--border);
 }
 
 /* Search highlight */
 html[data-theme="light"] .hl {
-  background: rgba(79, 70, 229, 0.22); /* indigo-600 @ 22% */
+  background: rgba(234, 88, 12, 0.22);
   border-radius: 3px;
   padding: 0 1px;
 }
@@ -117,45 +145,45 @@ html[data-theme="light"] *::-webkit-scrollbar-thumb:hover {
 /* --- SETTINGS SHEET OVERRIDES (light) --- */
 html[data-theme="light"] .overlay #settings,
 html[data-theme="light"] .overlay .sheet {
-  background: #FFFFFF !important;
-  color: #0B1220 !important;
-  border: 1px solid #E5E7EB;
-  box-shadow: 0 16px 40px rgba(2,6,23,0.16);
+  background: var(--surface) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border);
+  box-shadow: 0 16px 40px rgba(69, 26, 3, 0.16);
 }
 
 /* Headings */
 html[data-theme="light"] #settings h2,
 html[data-theme="light"] #settings h3 {
-  color: #0B1220 !important;
+  color: var(--text) !important;
 }
 
 /* Inputs & selects inside settings */
 html[data-theme="light"] #settings input[type="text"],
 html[data-theme="light"] #settings input[type="number"],
 html[data-theme="light"] #settings select {
-  background: #F8FAFC !important;   /* slate-50 */
-  color: #0B1220 !important;
-  border: 1px solid #E2E8F0 !important; /* slate-200 */
+  background: rgba(234, 88, 12, 0.08) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
 }
 html[data-theme="light"] #settings input::placeholder {
-  color: #64748B !important; /* slate-500 */
+  color: var(--text-muted) !important;
 }
 
 /* Checkbox accent */
 html[data-theme="light"] #settings input[type="checkbox"] {
-  accent-color: #4F46E5; /* indigo-600 */
+  accent-color: var(--accent);
 }
 
 /* Buttons in settings */
 html[data-theme="light"] #settings .actions button {
-  background: #4F46E5 !important;  /* indigo-600 */
-  color: #ffffff !important;
+  background: var(--accent) !important;
+  color: white !important;
   border: none !important;
 }
 html[data-theme="light"] #settings .actions .ghost {
-  background: #E2E8F0 !important;  /* slate-200 */
-  color: #0B1220 !important;
-  border: none !important;
+  background: rgba(234, 88, 12, 0.1) !important;
+  color: var(--text) !important;
+  border: 1px solid var(--border) !important;
 }
 
 /* Divider and subtle text in settings */

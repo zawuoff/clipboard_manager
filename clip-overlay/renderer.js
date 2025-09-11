@@ -22,8 +22,8 @@ const fuzzyThreshEl = $('#fuzzyThreshold');
 const autoPasteEl   = $('#autoPasteOnSelect'); // paste on select toggle
 const overlaySizeEl = $('#overlaySize');       // overlay size select
 
-/* Tabs container */
-const tabsEl = document.querySelector('.tabs');
+/* Sidebar tabs container */
+const tabsEl = document.querySelector('.sidebar-tabs');
 
 /* ---------- State ---------- */
 let items = [];
@@ -356,32 +356,7 @@ function openTextPrompt({ title = 'Input', description = '', placeholder = '', v
   });
 }
 
-/* ---------- Tabs overflow UX (wheel/drag) ---------- */
-function enableTabsOverflowUX() {
-  const el = document.querySelector('.tabs');
-  if (!el || el.dataset.overflowWired === '1') return;
-  el.dataset.overflowWired = '1';
-
-  // Wheel vertically => scroll horizontally
-  el.addEventListener('wheel', (e) => {
-    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
-      el.scrollLeft += e.deltaY;
-      e.preventDefault();
-    }
-  }, { passive: false });
-
-  // Click-drag to pan
-  let down = false, startX = 0, startLeft = 0;
-  el.addEventListener('mousedown', (e) => {
-    down = true; startX = e.pageX; startLeft = el.scrollLeft;
-    el.classList.add('dragging');
-  });
-  window.addEventListener('mouseup', () => { down = false; el.classList.remove('dragging'); });
-  window.addEventListener('mousemove', (e) => {
-    if (!down) return;
-    el.scrollLeft = startLeft - (e.pageX - startX);
-  });
-}
+/* Tab overflow UX no longer needed with sidebar design */
 
 /* ---------- Rendering list ---------- */
 function render(list = []) {
@@ -468,30 +443,46 @@ function render(list = []) {
   setSelected(Math.min(selectedIndex, Math.max(0, list.length - 1)));
 }
 
-/* ---------- Tabs (with collections) ---------- */
+/* ---------- Sidebar Tabs (with collections) ---------- */
 function rebuildTabs() {
   if (!tabsEl) return;
   tabsEl.innerHTML = `
-    <button class="tab" data-tab="recent">recent</button>
-    <button class="tab" data-tab="images">images</button>
-    <button class="tab" data-tab="urls">urls</button>
-    <button class="tab" data-tab="pinned">pinned</button>
-    <button class="tab" data-tab="collections">collections</button>
+    <button class="sidebar-tab" data-tab="recent">
+      <span class="tab-icon">🕒</span>
+      <span class="tab-label">Recent</span>
+    </button>
+    <button class="sidebar-tab" data-tab="images">
+      <span class="tab-icon">🖼️</span>
+      <span class="tab-label">Images</span>
+    </button>
+    <button class="sidebar-tab" data-tab="urls">
+      <span class="tab-icon">🔗</span>
+      <span class="tab-label">URLs</span>
+    </button>
+    <button class="sidebar-tab" data-tab="pinned">
+      <span class="tab-icon">📌</span>
+      <span class="tab-label">Pinned</span>
+    </button>
+    <button class="sidebar-tab" data-tab="collections">
+      <span class="tab-icon">📁</span>
+      <span class="tab-label">Collections</span>
+    </button>
   `;
   // append user collections as dynamic tabs
   (collections || []).forEach(c => {
     const b = document.createElement('button');
-    b.className = 'tab';
+    b.className = 'sidebar-tab';
     b.dataset.tab = `col:${c.id}`;
-    b.textContent = c.name;
+    b.innerHTML = `
+      <span class="tab-icon">📂</span>
+      <span class="tab-label">${escapeHTML(c.name)}</span>
+    `;
     b.title = c.name;
     tabsEl.appendChild(b);
   });
-  Array.from(tabsEl.querySelectorAll('.tab')).forEach(btn => {
+  Array.from(tabsEl.querySelectorAll('.sidebar-tab')).forEach(btn => {
     btn.classList.toggle('active', (btn.dataset.tab || 'recent') === currentTab);
   });
-
-  enableTabsOverflowUX(); // keep overflow UX after every rebuild
 }
 
 /* ---------- Filter + Search ---------- */
@@ -617,9 +608,9 @@ document.addEventListener('keydown', (e) => {
 /* Search input */
 searchEl?.addEventListener('input', () => applyFilter());
 
-/* Tabs click */
+/* Sidebar tabs click */
 tabsEl?.addEventListener('click', (e) => {
-  const btn = e.target.closest('.tab');
+  const btn = e.target.closest('.sidebar-tab');
   if (!btn) return;
   currentTab = btn.dataset.tab || 'recent';
   localStorage.setItem('clip_tab', currentTab);
@@ -1105,8 +1096,7 @@ async function boot() {
 window.addEventListener('DOMContentLoaded', async () => {
   await boot();
 
-  // Tabs overflow UX
-  enableTabsOverflowUX();
+  // UI ready
 
   // STACK chip gestures:
   // - Click: paste NEXT
