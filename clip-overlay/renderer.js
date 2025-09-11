@@ -22,6 +22,13 @@ const fuzzyThreshEl = $('#fuzzyThreshold');
 const autoPasteEl   = $('#autoPasteOnSelect'); // paste on select toggle
 const overlaySizeEl = $('#overlaySize');       // overlay size select
 
+/* Text shortcuts elements */
+const enableTextShortcutsEl = $('#enableTextShortcuts');
+const shortcutTriggerPrefixEl = $('#shortcutTriggerPrefix');
+const shortcutCaseSensitiveEl = $('#shortcutCaseSensitive');
+const shortcutMinLengthEl = $('#shortcutMinLength');
+const showShortcutNotificationsEl = $('#showShortcutNotifications');
+
 /* Sidebar tabs container */
 const tabsEl = document.querySelector('.sidebar-tabs');
 
@@ -141,25 +148,47 @@ function sortByScoreThenDefault(arr) {
   );
 }
 function baseSearchTextForItem(it) {
-  if (it.type !== 'image') return String(it.text || '');
-  const dims = it.wh ? `${it.wh.w}x${it.wh.h}` : '';
-  const meta = `${dims} ${it?.source?.app || ''} ${it?.source?.title || ''}`;
-  return (it.ocrText && it.ocrText.trim()) ? it.ocrText : meta;
+  let searchText = '';
+  
+  if (it.type !== 'image') {
+    searchText = String(it.text || '');
+  } else {
+    const dims = it.wh ? `${it.wh.w}x${it.wh.h}` : '';
+    const meta = `${dims} ${it?.source?.app || ''} ${it?.source?.title || ''}`;
+    searchText = (it.ocrText && it.ocrText.trim()) ? it.ocrText : meta;
+  }
+  
+  // Include shortcut keyword in search text
+  if (it.shortcut) {
+    searchText += ` ${it.shortcut}`;
+  }
+  
+  return searchText;
 }
 
-/* Smart query: tag/type/has/pinned + free text */
+/* Smart query: tag/type/has/pinned/shortcut + free text */
 function parseQuery(q) {
-  const out = { text: [], include: [], exclude: [], type: null, hasOCR: null, pinned: null };
+  const out = { text: [], include: [], exclude: [], type: null, hasOCR: null, pinned: null, hasShortcut: null };
   const parts = String(q || '').trim().split(/\s+/).filter(Boolean);
   for (const p of parts) {
     const mTag = p.match(/^(-)?tag:(.+)$/i);
     if (mTag) { (mTag[1] ? out.exclude : out.include).push(mTag[2].toLowerCase()); continue; }
     const mType = p.match(/^type:(image|text)$/i);
     if (mType) { out.type = mType[1].toLowerCase(); continue; }
-    const mHas = p.match(/^has:(ocr)$/i);
-    if (mHas) { out.hasOCR = true; continue; }
+    const mHas = p.match(/^has:(ocr|shortcut)$/i);
+    if (mHas) { 
+      if (mHas[1].toLowerCase() === 'ocr') out.hasOCR = true; 
+      if (mHas[1].toLowerCase() === 'shortcut') out.hasShortcut = true; 
+      continue; 
+    }
     const mPin = p.match(/^pinned:(yes|no)$/i);
     if (mPin) { out.pinned = (mPin[1].toLowerCase() === 'yes'); continue; }
+    const mShortcut = p.match(/^shortcut:(.+)$/i);
+    if (mShortcut) { 
+      // Search for specific shortcut keyword
+      out.text.push(mShortcut[1]); 
+      continue; 
+    }
     out.text.push(p);
   }
   return out;
@@ -168,6 +197,7 @@ function itemPassesFilters(it, qobj) {
   if (qobj.type && it.type !== qobj.type) return false;
   if (qobj.pinned != null && !!it.pinned !== qobj.pinned) return false;
   if (qobj.hasOCR && !it.ocrText) return false;
+  if (qobj.hasShortcut != null && !!it.shortcut !== qobj.hasShortcut) return false;
   const tags = uniq(it.tags || []);
   for (const t of qobj.include) if (!tags.includes(t)) return false;
   for (const t of qobj.exclude) if (tags.includes(t)) return false;
@@ -262,6 +292,15 @@ function svg(name, opts = {}) {
       return `<svg class="icon stroke" viewBox="0 0 24 24" aria-hidden="true">
         <rect x="9" y="9" width="12" height="12" rx="2"/><rect x="3" y="3" width="12" height="12" rx="2"/>
       </svg>`;
+    case 'keyboard': // Text Shortcuts
+      return `<svg class="icon stroke" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="2" y="6" width="20" height="12" rx="2"/>
+        <line x1="6" y1="10" x2="6" y2="10"/>
+        <line x1="10" y1="10" x2="10" y2="10"/>
+        <line x1="14" y1="10" x2="14" y2="10"/>
+        <line x1="18" y1="10" x2="18" y2="10"/>
+        <line x1="6" y1="14" x2="18" y2="14"/>
+      </svg>`;
     default: return '';
   }
 }
@@ -316,6 +355,118 @@ function buildQuickActionsHTML(it) {
 }
 
 /* ---------- Simple in-overlay text prompt (used by Collections & Tags) ---------- */
+async function openShortcutPrompt(item) {
+  const existingShortcut = item.shortcut || '';
+  
+  return new Promise(resolve => {
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = `
+      position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:9999;
+      display:flex; align-items:center; justify-content:center;`;
+    const card = document.createElement('div');
+    card.style.cssText = `
+      width: min(480px, 92vw); background: var(--panel, #1f2937); color: var(--fg, #e5e7eb);
+      border-radius:12px; box-shadow:0 10px 30px rgba(0,0,0,.35); padding:16px;`;
+    
+    const previewText = item.type === 'text' 
+      ? trimOneLine(item.text || '') 
+      : `Image ${item.wh ? `(${item.wh.w}×${item.wh.h})` : ''}`;
+    
+    card.innerHTML = `
+      <div style="font-weight:600; font-size:16px; margin-bottom:6px;">
+        ${existingShortcut ? 'Edit Text Shortcut' : 'Create Text Shortcut'}
+      </div>
+      <div style="opacity:.8; font-size:12px; margin-bottom:10px; line-height:1.4;">
+        ${escapeHTML(previewText)}
+      </div>
+      <div style="opacity:.7; font-size:11px; margin-bottom:12px;">
+        Type <strong>${escapeHTML(cfg.shortcutTriggerPrefix || '//')}${escapeHTML(existingShortcut || 'shortcut')}</strong>, select it, and paste (Ctrl+V) to expand.
+      </div>
+      <input id="__shortcut_input" type="text" placeholder="e.g. email_temp_1, signature, addr"
+             value="${escapeHTML(existingShortcut)}"
+             style="width:100%; padding:10px 12px; font-size:14px; border-radius:8px;
+                    border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.06); color:inherit;
+                    font-family: monospace;" />
+      <div id="__shortcut_preview" style="margin-top:8px; font-size:11px; opacity:.6;">
+        Preview: Type "${escapeHTML(cfg.shortcutTriggerPrefix || '//')}${escapeHTML(existingShortcut || 'your_shortcut')}", select + Ctrl+V → Expands
+      </div>
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
+        ${existingShortcut ? '<button id="__shortcut_remove" style="padding:8px 12px; border-radius:8px; border:1px solid #ef4444; background:transparent; color:#ef4444;">Remove</button>' : ''}
+        <button id="__shortcut_cancel" style="padding:8px 12px; border-radius:8px; border:1px solid rgba(255,255,255,.12); background:transparent; color:inherit;">Cancel</button>
+        <button id="__shortcut_save" style="padding:8px 12px; border-radius:8px; border:0; background:#3b82f6; color:white; font-weight:600;">Save</button>
+      </div>`;
+    backdrop.appendChild(card);
+    document.body.appendChild(backdrop);
+
+    const input = card.querySelector('#__shortcut_input');
+    const btnSave = card.querySelector('#__shortcut_save');
+    const btnCancel = card.querySelector('#__shortcut_cancel');
+    const btnRemove = card.querySelector('#__shortcut_remove');
+
+    const updatePreview = () => {
+      const preview = card.querySelector('#__shortcut_preview');
+      const val = input.value.trim();
+      if (preview) {
+        const prefix = cfg.shortcutTriggerPrefix || '//';
+        preview.innerHTML = val 
+          ? `Preview: Type "${escapeHTML(prefix)}${escapeHTML(val)}", select + Ctrl+V → Expands`
+          : `Preview: Type "${escapeHTML(prefix)}your_shortcut", select + Ctrl+V → Expands`;
+      }
+    };
+
+    input.addEventListener('input', updatePreview);
+
+    const done = (result) => { 
+      try { document.body.removeChild(backdrop); } catch {} 
+      resolve(result); 
+    };
+    
+    btnSave.addEventListener('click', async () => {
+      const keyword = input.value.trim();
+      if (!keyword) {
+        input.focus();
+        return;
+      }
+      
+      // Validate keyword format
+      if (!/^[a-zA-Z0-9_-]+$/.test(keyword)) {
+        alert('Shortcut keyword can only contain letters, numbers, underscores, and hyphens.');
+        input.focus();
+        return;
+      }
+      
+      // Check for duplicate shortcuts (excluding current item)
+      const existingItem = items.find(i => i.shortcut === keyword && i.id !== item.id);
+      if (existingItem) {
+        const confirm = window.confirm(`Shortcut "${keyword}" is already used by another item. Replace it?`);
+        if (!confirm) {
+          input.focus();
+          return;
+        }
+      }
+      
+      done({ action: 'save', keyword });
+    });
+    
+    btnCancel.addEventListener('click', () => done({ action: 'cancel' }));
+    btnRemove?.addEventListener('click', () => done({ action: 'remove' }));
+    
+    backdrop.addEventListener('click', (e) => { 
+      if (e.target === backdrop) done({ action: 'cancel' }); 
+    });
+    
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); btnSave.click(); }
+      if (e.key === 'Escape') { e.preventDefault(); btnCancel.click(); }
+    });
+    
+    setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+  });
+}
+
 function openTextPrompt({ title = 'Input', description = '', placeholder = '', value = '', okText = 'Save', cancelText = 'Cancel' } = {}) {
   return new Promise(resolve => {
     const backdrop = document.createElement('div');
@@ -382,6 +533,7 @@ function render(list = []) {
       const metaHTML = `
         ${new Date(it.ts || Date.now()).toLocaleString()}${ctx}
         ${iconBtn('pin-btn', 'star', it.pinned ? 'Unpin' : 'Pin', it.pinned, it.id)}
+        ${iconBtn('shortcut-btn', 'keyboard', it.shortcut ? 'Edit text shortcut' : 'Create text shortcut', !!it.shortcut, it.id)}
         ${iconBtn('stack-btn', 'stack', inPasteStack(it.id) ? 'Remove from Paste Stack' : 'Add to Paste Stack', inPasteStack(it.id), it.id)}
         ${iconBtn('col-btn', 'folder', 'Add/remove in collections', false, it.id)}
         ${iconBtn('del-btn', 'trash', 'Delete', false, it.id)}
@@ -412,6 +564,7 @@ function render(list = []) {
         ${iconBtn('pin-btn', 'star', it.pinned ? 'Unpin' : 'Pin', it.pinned, it.id)}
         ${isUrlItem(it) ? iconBtn('open-btn', 'external', 'Open in browser', false, it.id) : ''}
         ${qaHTML}
+        ${iconBtn('shortcut-btn', 'keyboard', it.shortcut ? 'Edit text shortcut' : 'Create text shortcut', !!it.shortcut, it.id)}
         ${iconBtn('stack-btn', 'stack', inPasteStack(it.id) ? 'Remove from Paste Stack' : 'Add to Paste Stack', inPasteStack(it.id), it.id)}
         ${iconBtn('col-btn', 'folder', 'Add/remove in collections', false, it.id)}
         ${iconBtn('del-btn', 'trash', 'Delete', false, it.id)}
@@ -428,6 +581,21 @@ function render(list = []) {
     const wrap = li.querySelector('.tags');
     const tagList = uniq(it.tags || []);
     if (wrap) {
+      // Add shortcut badge first if exists
+      if (it.shortcut) {
+        const shortcutBadge = document.createElement('span');
+        shortcutBadge.className = 'shortcut-badge';
+        shortcutBadge.textContent = `⌨ ${it.shortcut}`;
+        shortcutBadge.title = `Text shortcut: ${it.shortcut} (click to filter)`;
+        shortcutBadge.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const cur = searchEl.value.trim();
+          searchEl.value = (cur ? cur + ' ' : '') + `shortcut:${it.shortcut}`;
+          applyFilter();
+        });
+        wrap.appendChild(shortcutBadge);
+      }
+      
       tagList.forEach(t => wrap.appendChild(tagPill(t, { removable: true, onRemove: () => removeTagForItem(it, t) })));
       const addBtn = document.createElement('button');
       addBtn.className = 'tag-add';
@@ -713,6 +881,38 @@ resultsEl?.addEventListener('click', async (e) => {
       items = await window.api.getHistory();
       applyFilter();
     } catch (err) { console.error('[delete] error', err); }
+    return;
+  }
+
+  // Shortcut button
+  const shortcutBtn = e.target.closest('.shortcut-btn');
+  if (shortcutBtn) {
+    e.preventDefault(); e.stopPropagation();
+    const id = Number(shortcutBtn.dataset.id) || getRowItemId();
+    const it = items.find(i => i.id === id);
+    if (!it) return;
+    
+    try {
+      const result = await openShortcutPrompt(it);
+      if (result.action === 'save') {
+        // Clear existing shortcut from any other items first
+        const existingItem = items.find(i => i.shortcut === result.keyword && i.id !== it.id);
+        if (existingItem) {
+          await window.api.updateHistoryItem(existingItem.id, { shortcut: null });
+        }
+        
+        // Set new shortcut
+        await window.api.updateHistoryItem(it.id, { shortcut: result.keyword });
+        items = await window.api.getHistory();
+        applyFilter();
+      } else if (result.action === 'remove') {
+        await window.api.updateHistoryItem(it.id, { shortcut: null });
+        items = await window.api.getHistory();
+        applyFilter();
+      }
+    } catch (err) {
+      console.error('[shortcut] error', err);
+    }
     return;
   }
 
@@ -1080,6 +1280,13 @@ async function boot() {
     if (fuzzyThreshEl) fuzzyThreshEl.value = String(cfg.fuzzyThreshold);
     if (autoPasteEl)   autoPasteEl.checked = !!cfg.autoPasteOnSelect;
     if (overlaySizeEl) overlaySizeEl.value = cfg.overlaySize || 'large';
+    
+    // Text shortcuts settings
+    if (enableTextShortcutsEl) enableTextShortcutsEl.checked = !!cfg.enableTextShortcuts;
+    if (shortcutTriggerPrefixEl) shortcutTriggerPrefixEl.value = cfg.shortcutTriggerPrefix || '//';
+    if (shortcutCaseSensitiveEl) shortcutCaseSensitiveEl.checked = !!cfg.shortcutCaseSensitive;
+    if (shortcutMinLengthEl) shortcutMinLengthEl.value = String(cfg.shortcutMinLength || 2);
+    if (showShortcutNotificationsEl) showShortcutNotificationsEl.checked = !!cfg.showShortcutNotifications;
   } catch (e) {
     console.warn('[renderer] getSettings failed:', e?.message);
   }
@@ -1181,6 +1388,12 @@ saveBtn?.addEventListener('click', async () => {
     fuzzyThreshold: Number(fuzzyThreshEl?.value || cfg.fuzzyThreshold || 0.4),
     autoPasteOnSelect: !!(autoPasteEl?.checked ?? cfg.autoPasteOnSelect),
     overlaySize: (overlaySizeEl?.value || cfg.overlaySize || 'large'),
+    // Text shortcuts settings
+    enableTextShortcuts: !!(enableTextShortcutsEl?.checked ?? cfg.enableTextShortcuts),
+    shortcutTriggerPrefix: (shortcutTriggerPrefixEl?.value || cfg.shortcutTriggerPrefix || '//'),
+    shortcutCaseSensitive: !!(shortcutCaseSensitiveEl?.checked ?? cfg.shortcutCaseSensitive),
+    shortcutMinLength: Number(shortcutMinLengthEl?.value || cfg.shortcutMinLength || 2),
+    showShortcutNotifications: !!(showShortcutNotificationsEl?.checked ?? cfg.showShortcutNotifications),
   };
   cfg = { ...cfg, ...payload };
   try {

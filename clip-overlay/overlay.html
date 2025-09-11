@@ -124,6 +124,38 @@
         <input id="fuzzyThreshold" type="number" min="0.10" max="0.90" step="0.05" />
       </label>
 
+      <h3 style="margin-top: 24px; margin-bottom: 16px; font-size: 14px; color: var(--text);">Text Shortcuts</h3>
+
+      <label class="stack">
+        <span>Enable text shortcuts</span>
+        <input id="enableTextShortcuts" type="checkbox" checked />
+      </label>
+
+      <label class="stack">
+        <span>Trigger prefix</span>
+        <select id="shortcutTriggerPrefix">
+          <option value="//">//shortcut (recommended)</option>
+          <option value="##">##shortcut</option>
+          <option value="::">::shortcut</option>
+          <option value="++">++shortcut</option>
+        </select>
+      </label>
+
+      <label class="stack">
+        <span>Case sensitive shortcuts</span>
+        <input id="shortcutCaseSensitive" type="checkbox" />
+      </label>
+
+      <label class="stack">
+        <span>Minimum shortcut length</span>
+        <input id="shortcutMinLength" type="number" min="1" max="10" value="2" />
+      </label>
+
+      <label class="stack">
+        <span>Show expansion notifications</span>
+        <input id="showShortcutNotifications" type="checkbox" checked />
+      </label>
+
       <div class="actions">
         <button id="saveSettings">Save</button>
         <button id="closeSettings" class="ghost">Close</button>

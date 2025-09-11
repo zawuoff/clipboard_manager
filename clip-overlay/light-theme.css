@@ -1,28 +1,30 @@
-/* Light Theme Overrides */
+/* Light Theme Overrides – using the same purple palette */
 html[data-theme="light"] {
-  --primary: #78350f;         /* Warm brown */
-  --secondary: #451a03;       /* Deep brown */
-  --accent: #ea580c;          /* Bright orange */
-  --accent-hover: #dc2626;    /* Red-orange */
-  --success: #059669;         /* Forest green */
-  --surface: #fef7ed;         /* Warm off-white */
-  --surface-elevated: #fed7aa; /* Light warm */
-  --bg: rgba(254, 247, 237, 0.95);
-  --bg-soft: rgba(234, 88, 12, 0.06);
-  --text: #431407;            /* Dark warm brown */
-  --text-dim: #78350f;        /* Medium brown */
-  --text-muted: #a16207;      /* Warm muted */
-  --border: rgba(234, 88, 12, 0.2);
-  --border-subtle: rgba(234, 88, 12, 0.1);
-  --shadow: 0 25px 50px -12px rgba(69, 26, 3, 0.25);
-  --shadow-card: 0 4px 6px -1px rgba(69, 26, 3, 0.1), 0 2px 4px -1px rgba(69, 26, 3, 0.06);
-  --shadow-elevated: 0 10px 15px -3px rgba(69, 26, 3, 0.1), 0 4px 6px -2px rgba(69, 26, 3, 0.05);
+  --primary: #EEECFD;           /* page background */
+  --secondary: #DDDAFA;         /* secondary backgrounds */
+  --accent: #7452DC;            /* action/highlight */
+  --accent-hover: #6839D6;      /* deeper hover */
+  --success: #59A98C;           /* softened to fit palette */
+  --surface: #DDDAFA;           /* sidebar/panels */
+  --surface-elevated: #FFFFFF;  /* cards/items */
+  --bg: rgba(238, 236, 253, 0.95);
+  --bg-soft: rgba(204, 199, 247, 0.10);
+  --text: #2B2463;              /* deep readable violet */
+  --text-dim: #4E4594;
+  --text-muted: #8168E2;
+  --border: rgba(172, 162, 240, 0.35);
+  --border-subtle: rgba(188, 181, 244, 0.22);
+  --shadow: 0 25px 50px -12px rgba(38, 26, 84, 0.18);
+  --shadow-card: 0 4px 6px -1px rgba(38, 26, 84, 0.10), 0 2px 4px -1px rgba(38, 26, 84, 0.06);
+  --shadow-elevated: 0 10px 15px -3px rgba(38, 26, 84, 0.12), 0 4px 6px -2px rgba(38, 26, 84, 0.08);
+
+  /* icons in light */
+  --icon: #4E4594;
+  --icon-muted: #9D8FEC;
+  --icon-active: #7452DC;
 }
 
-html[data-theme="light"] body {
-  background: #f8fafc;
-  color: var(--text);
-}
+html[data-theme="light"] body { background: #EEECFD; color: var(--text); }
 
 html[data-theme="light"] .overlay {
   background: var(--bg);
@@ -31,82 +33,77 @@ html[data-theme="light"] .overlay {
   box-shadow: var(--shadow);
 }
 
-/* Sidebar in light theme */
+/* Sidebar */
 html[data-theme="light"] .sidebar {
-  background: linear-gradient(180deg, #fed7aa 0%, #fdba74 100%);
+  background: linear-gradient(180deg, #DDDAFA 0%, #EEECFD 100%);
   border-right: 1px solid var(--border);
 }
-
-html[data-theme="light"] .sidebar-tab {
-  color: rgba(67, 20, 7, 0.8);
-}
-
+html[data-theme="light"] .sidebar-tab { color: rgba(46, 38, 100, 0.86); }
 html[data-theme="light"] .sidebar-tab:hover {
-  background: rgba(234, 88, 12, 0.15);
+  background: rgba(204, 199, 247, 0.22);
   color: var(--text);
   transform: translateX(2px);
 }
-
 html[data-theme="light"] .sidebar-tab.active {
-  background: linear-gradient(135deg, #ea580c 0%, #f97316 100%);
-  color: white;
-  box-shadow: 0 4px 12px rgba(234, 88, 12, 0.3);
-  border: 1px solid rgba(249, 115, 22, 0.4);
+  background: linear-gradient(135deg, #8F7CE7 0%, #7452DC 100%);
+  color: #FFFFFF;
+  box-shadow: 0 4px 12px rgba(116, 82, 220, 0.28);
+  border: 1px solid rgba(172, 162, 240, 0.45);
 }
 
-/* Toolbar in light theme */
+/* Toolbar */
 html[data-theme="light"] .toolbar {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
 
 /* Results area */
-html[data-theme="light"] .results {
-  background: var(--surface-elevated);
-}
+html[data-theme="light"] .results { background: var(--primary); }
 
-/* Row states in light theme */
+/* Row states */
 html[data-theme="light"] .row:hover {
   border-color: var(--accent);
-  background: rgba(253, 186, 116, 0.3);
-  box-shadow: 0 4px 8px rgba(234, 88, 12, 0.1);
+  background: rgba(204, 199, 247, 0.35);
+  box-shadow: 0 4px 8px rgba(116, 82, 220, 0.18);
   transform: translateY(-1px);
 }
-
 html[data-theme="light"] .row.selected {
   border-color: var(--accent);
-  box-shadow: 0 6px 16px rgba(234, 88, 12, 0.2);
-  background: rgba(253, 186, 116, 0.4);
+  box-shadow: 0 6px 16px rgba(116, 82, 220, 0.24);
+  background: rgba(204, 199, 247, 0.42);
 }
 
 /* Settings sheet */
-html[data-theme="light"] .sheet {
+html[data-theme="light"] .sheet,
+html[data-theme="light"] .overlay #settings {
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border);
-  box-shadow: 0 16px 40px rgba(69, 26, 3, 0.16);
+  box-shadow: 0 16px 40px rgba(38, 26, 84, 0.16);
 }
 
-/* Toolbar buttons in light theme */
+/* Toolbar buttons */
 html[data-theme="light"] .toolbar button {
-  border: 1px solid rgba(234, 88, 12, 0.2);
-  background: rgba(234, 88, 12, 0.08);
+  border: 1px solid var(--border);
+  background: rgba(204, 199, 247, 0.12);
+  color: var(--text);
 }
-
 html[data-theme="light"] .toolbar button:hover {
   background: var(--accent);
-  color: white;
+  color: #fff;
   border-color: var(--accent);
   transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(234, 88, 12, 0.2);
+  box-shadow: 0 4px 8px rgba(116, 82, 220, 0.22);
 }
+
+/* Sheet headings/inputs/buttons */
 html[data-theme="light"] .sheet h2,
 html[data-theme="light"] .sheet h3 { color: var(--text); }
 
 html[data-theme="light"] .sheet input[type="text"],
 html[data-theme="light"] .sheet input[type="number"],
 html[data-theme="light"] .sheet select {
-  background: rgba(234, 88, 12, 0.08);
+  background: rgba(204, 199, 247, 0.12);
   color: var(--text);
   border: 1px solid var(--border);
 }
@@ -118,74 +115,27 @@ html[data-theme="light"] .sheet .actions button {
   border: none;
 }
 html[data-theme="light"] .sheet .actions .ghost {
-  background: rgba(234, 88, 12, 0.1);
+  background: rgba(204, 199, 247, 0.14);
   color: var(--text);
   border: 1px solid var(--border);
 }
 
 /* Search highlight */
 html[data-theme="light"] .hl {
-  background: rgba(234, 88, 12, 0.22);
+  background: rgba(116, 82, 220, 0.22);
   border-radius: 3px;
   padding: 0 1px;
 }
 
 /* Scrollbar (optional, subtle) */
-html[data-theme="light"] *::-webkit-scrollbar {
-  width: 10px; height: 10px;
-}
+html[data-theme="light"] *::-webkit-scrollbar { width: 10px; height: 10px; }
 html[data-theme="light"] *::-webkit-scrollbar-thumb {
-  background: #CBD5E1;  /* slate-300 */
+  background: #BCB5F4;
   border-radius: 6px;
 }
-html[data-theme="light"] *::-webkit-scrollbar-thumb:hover {
-  background: #94A3B8;  /* slate-400 */
-}
+html[data-theme="light"] *::-webkit-scrollbar-thumb:hover { background: #7452DC; }
 
 /* --- SETTINGS SHEET OVERRIDES (light) --- */
-html[data-theme="light"] .overlay #settings,
-html[data-theme="light"] .overlay .sheet {
-  background: var(--surface) !important;
-  color: var(--text) !important;
-  border: 1px solid var(--border);
-  box-shadow: 0 16px 40px rgba(69, 26, 3, 0.16);
-}
-
-/* Headings */
-html[data-theme="light"] #settings h2,
-html[data-theme="light"] #settings h3 {
-  color: var(--text) !important;
-}
-
-/* Inputs & selects inside settings */
-html[data-theme="light"] #settings input[type="text"],
-html[data-theme="light"] #settings input[type="number"],
-html[data-theme="light"] #settings select {
-  background: rgba(234, 88, 12, 0.08) !important;
-  color: var(--text) !important;
-  border: 1px solid var(--border) !important;
-}
-html[data-theme="light"] #settings input::placeholder {
-  color: var(--text-muted) !important;
-}
-
-/* Checkbox accent */
-html[data-theme="light"] #settings input[type="checkbox"] {
-  accent-color: var(--accent);
-}
-
-/* Buttons in settings */
-html[data-theme="light"] #settings .actions button {
-  background: var(--accent) !important;
-  color: white !important;
-  border: none !important;
-}
-html[data-theme="light"] #settings .actions .ghost {
-  background: rgba(234, 88, 12, 0.1) !important;
-  color: var(--text) !important;
-  border: 1px solid var(--border) !important;
-}
-
-/* Divider and subtle text in settings */
-html[data-theme="light"] #settings .divider { background: #E5E7EB !important; }
-html[data-theme="light"] #settings .rowline { color: #334155 !important; } /* slate-700 */
+html[data-theme="light"] #settings .divider { background: #BCB5F4 !important; }
+html[data-theme="light"] #settings .rowline { color: #4E4594 !important; }
+html[data-theme="light"] #settings input[type="checkbox"] { accent-color: var(--accent); }

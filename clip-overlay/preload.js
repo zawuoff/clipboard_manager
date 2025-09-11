@@ -127,4 +127,9 @@ stack: {
   pasteNext: (data) => ipcRenderer.invoke('stack:pasteNext', data),
 },
 
+// Shortcuts
+shortcuts: {
+  expand: (keyword) => ipcRenderer.invoke('shortcut:expand', keyword),
+},
+
 });

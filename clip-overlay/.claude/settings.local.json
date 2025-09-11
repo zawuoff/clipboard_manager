@@ -1,7 +1,11 @@
 {
   "permissions": {
     "allow": [
-      "Bash(grep:*)"
+      "Bash(grep:*)",
+      "Bash(npm run dev:*)",
+      "Bash(npx electron:*)",
+      "Bash(npm start)",
+      "Bash(node:*)"
     ],
     "deny": [],
     "ask": []
