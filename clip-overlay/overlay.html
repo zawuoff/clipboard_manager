@@ -23,25 +23,25 @@
       </div>
       <div class="sidebar-tabs">
         <button class="sidebar-tab" data-tab="recent">
-          <span class="tab-icon">🕒</span>
           <span class="tab-label">Recent</span>
         </button>
         <button class="sidebar-tab" data-tab="images">
-          <span class="tab-icon">🖼️</span>
           <span class="tab-label">Images</span>
         </button>
         <button class="sidebar-tab" data-tab="urls">
-          <span class="tab-icon">🔗</span>
           <span class="tab-label">URLs</span>
         </button>
         <button class="sidebar-tab" data-tab="pinned">
-          <span class="tab-icon">📌</span>
           <span class="tab-label">Pinned</span>
         </button>
         <button class="sidebar-tab" data-tab="collections">
-          <span class="tab-icon">📁</span>
           <span class="tab-label">Collections</span>
         </button>
+      </div>
+      <div class="sidebar-footer">
+        <a href="#" class="request-feature-link">
+          <span class="tab-label">Request a feature ↗</span>
+        </a>
       </div>
     </nav>
 
@@ -62,7 +62,6 @@
           <span id="stackCount">0</span>
         </div>
 
-        <button id="clearBtn" title="Clear history">Clear</button>
         <button id="settingsBtn" title="Settings">⚙</button>
       </header>
 
@@ -82,14 +81,7 @@
         </select>
       </label>
 
-      <label class="stack">
-        <span>Overlay size</span>
-        <select id="overlaySize">
-          <option value="small">Small</option>
-          <option value="medium">Medium</option>
-          <option value="large">Large</option>
-        </select>
-      </label>
+      <!-- Overlay size setting removed - using single fixed size -->
 
       <label class="stack">
         <span>Global Hotkey</span>
@@ -158,6 +150,7 @@
 
       <div class="actions">
         <button id="saveSettings">Save</button>
+        <button id="clearBtn" class="ghost">Clear History</button>
         <button id="closeSettings" class="ghost">Close</button>
       </div>
     </section>

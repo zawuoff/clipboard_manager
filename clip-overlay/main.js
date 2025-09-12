@@ -79,7 +79,7 @@ const settingsStore = new Store({
     // NEW (no UI change; default ON)
     autoPasteOnSelect: true,
     debugLogging: true,
-    overlaySize: 'large', // NEW
+    // overlaySize removed - now using single fixed size
     // Text shortcuts settings
     enableTextShortcuts: true,
     shortcutTriggerPrefix: '//',
@@ -196,12 +196,9 @@ async function ensureDir(dir) { await fsp.mkdir(dir, { recursive: true }); }
 function sha1(buf) { return crypto.createHash('sha1').update(buf).digest('hex'); }
 const uniq = (arr) => Array.from(new Set((arr || []).filter(Boolean).map(s => String(s).toLowerCase())));
 
-function overlayWH(size) {
-  switch ((size || 'large').toLowerCase()) {
-    case 'small':  return { width: 640, height: 440 };
-    case 'medium': return { width: 800, height: 520 };
-    default:       return { width: 900, height: 560 }; // current size = large
-  }
+function overlayWH() {
+  // Single fixed size: 15% bigger than medium (800x520) = 920x600
+  return { width: 920, height: 600 };
 }
 
 // Centers the overlay on the display under the mouse cursor
@@ -284,7 +281,7 @@ let overlayWin = null;
 function createOverlay() {
   if (overlayWin) return overlayWin;
 
-  const { width, height } = overlayWH(settingsStore.get('overlaySize')); // small/medium/large
+  const { width, height } = overlayWH(); // single fixed size
   overlayWin = new BrowserWindow({
     width,
     height,
@@ -328,12 +325,12 @@ function showOverlay() {
 
   // Apply current CONTENT size every time, then re-center using OUTER size
   try {
-    const { width: cw, height: ch } = overlayWH(settingsStore.get('overlaySize'));
+    const { width: cw, height: ch } = overlayWH();
     win.setContentSize(cw, ch);                 // <-- downsizing-safe
     const [w, h] = win.getSize();               // outer size after content resize
     centerOverlayOnActiveDisplay(win, w, h);
     console.log('[overlay:size]', {
-      overlaySize: settingsStore.get('overlaySize'),
+      // overlaySize removed
       content: { width: cw, height: ch },
       window:  { width: w,  height: h  }
     });
@@ -752,12 +749,7 @@ ipcMain.handle('shortcut:expand', async (_e, keyword) => {
 });
 
 /* ---------- IPC ---------- */
-ipcMain.handle('overlay:resize', (_e, size) => {
-  if (!overlayWin) return false;
-  const { width, height } = overlayWH(size || settingsStore.get('overlaySize'));
-  try { overlayWin.setSize(width, height, false); return true; }
-  catch (e) { console.log('overlay:resize:error', e.message); return false; }
-});
+// Resize handler removed - using single fixed size
 
 ipcMain.handle('history:get', () => historyStore.get('items') || []);
 ipcMain.handle('history:clear', async () => {
@@ -1027,7 +1019,7 @@ ipcMain.handle('settings:get', () => ({
   fuzzyThreshold: settingsStore.get('fuzzyThreshold'),
   autoPasteOnSelect: settingsStore.get('autoPasteOnSelect'),
   debugLogging: settingsStore.get('debugLogging'),
-  overlaySize: settingsStore.get('overlaySize'),
+  // overlaySize removed
   enableTextShortcuts: settingsStore.get('enableTextShortcuts'),
   shortcutTriggerPrefix: settingsStore.get('shortcutTriggerPrefix'),
   shortcutCaseSensitive: settingsStore.get('shortcutCaseSensitive'),
@@ -1044,10 +1036,7 @@ ipcMain.handle('settings:save', async (_e, s) => {
   settingsStore.set('fuzzyThreshold', th);
   if (Object.prototype.hasOwnProperty.call(s, 'autoPasteOnSelect')) settingsStore.set('autoPasteOnSelect', !!s.autoPasteOnSelect);
   if (Object.prototype.hasOwnProperty.call(s, 'debugLogging')) settingsStore.set('debugLogging', !!s.debugLogging);
-  if (Object.prototype.hasOwnProperty.call(s, 'overlaySize')) {
-      const v = String(s.overlaySize || '').toLowerCase();
-      settingsStore.set('overlaySize', ['small','medium','large'].includes(v) ? v : 'large');
-    }
+  // overlaySize setting removed - using single fixed size
   
   // Text shortcuts settings
   if (Object.prototype.hasOwnProperty.call(s, 'enableTextShortcuts')) {

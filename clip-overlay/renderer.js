@@ -20,7 +20,7 @@ const searchModeEl  = $('#searchMode');
 const fuzzyThreshEl = $('#fuzzyThreshold');
 
 const autoPasteEl   = $('#autoPasteOnSelect'); // paste on select toggle
-const overlaySizeEl = $('#overlaySize');       // overlay size select
+// overlay size select removed - using single fixed size
 
 /* Text shortcuts elements */
 const enableTextShortcutsEl = $('#enableTextShortcuts');
@@ -45,7 +45,7 @@ let cfg = {
   searchMode: 'fuzzy',
   fuzzyThreshold: 0.4,
   autoPasteOnSelect: true,
-  overlaySize: 'large',
+  // overlaySize removed
 };
 
 /* COLLECTIONS state */
@@ -540,14 +540,30 @@ function render(list = []) {
       `;
 
       li.innerHTML = `
-        <div class="thumbwrap">
-          <img class="thumb" src="${it.thumb}" alt="Clipboard image${dims}" />
+        <div class="card-header">
+          <h3 class="card-title" contenteditable="true" data-id="${it.id}">${escapeHTML(it.header || 'Untitled')}</h3>
+          <button class="edit-header-btn" data-id="${it.id}" title="Edit header">✏️</button>
         </div>
-        <div class="cell">
-          <div class="primary">Image${dims}</div>
-          ${ocrHTML}
-          <div class="tags"></div>
-          <div class="meta">${metaHTML}</div>
+        <div class="card-metadata">
+          ${new Date(it.ts || Date.now()).toLocaleString()}
+          ${it.source || it.wh ? `<button class="info-btn" data-id="${it.id}" title="Show details">ℹ️</button>` : ''}
+        </div>
+        <div class="card-content">
+          <div class="thumbwrap">
+            <img class="thumb" src="${it.thumb}" alt="Clipboard image" />
+          </div>
+        </div>
+        <div class="tags"></div>
+        <div class="card-actions">
+          <div class="card-actions-left">
+            ${iconBtn('pin-btn', 'star', it.pinned ? 'Unpin' : 'Pin', it.pinned, it.id)}
+            ${iconBtn('stack-btn', 'stack', inPasteStack(it.id) ? 'Remove from Paste Stack' : 'Add to Paste Stack', inPasteStack(it.id), it.id)}
+          </div>
+          <div class="card-actions-right">
+            ${iconBtn('shortcut-btn', 'keyboard', it.shortcut ? 'Edit text shortcut' : 'Create text shortcut', !!it.shortcut, it.id)}
+            ${iconBtn('col-btn', 'folder', 'Add/remove in collections', false, it.id)}
+            ${iconBtn('del-btn', 'trash', 'Delete', false, it.id)}
+          </div>
         </div>
       `;
     } else {
@@ -571,9 +587,32 @@ function render(list = []) {
       `;
 
       li.innerHTML = `
-        <div class="primary">${primaryHTML}</div>
+        <div class="card-header">
+          <h3 class="card-title" contenteditable="true" data-id="${it.id}">${escapeHTML(it.header || 'Untitled')}</h3>
+          <button class="edit-header-btn" data-id="${it.id}" title="Edit header">✏️</button>
+        </div>
+        <div class="card-metadata">
+          ${new Date(it.ts || Date.now()).toLocaleString()}
+          ${it.source ? `<button class="info-btn" data-id="${it.id}" title="Show details">ℹ️</button>` : ''}
+        </div>
+        <div class="card-content">
+          <div class="primary">${primaryHTML}</div>
+          ${rawPrimary.length > 100 ? `<button class="expand-btn" data-id="${it.id}" title="View full text">...</button>` : ''}
+        </div>
         <div class="tags"></div>
-        <div class="meta">${metaHTML}</div>
+        <div class="card-actions">
+          <div class="card-actions-left">
+            ${iconBtn('pin-btn', 'star', it.pinned ? 'Unpin' : 'Pin', it.pinned, it.id)}
+            ${isUrlItem(it) ? iconBtn('open-btn', 'external', 'Open in browser', false, it.id) : ''}
+            ${qaHTML}
+            ${iconBtn('stack-btn', 'stack', inPasteStack(it.id) ? 'Remove from Paste Stack' : 'Add to Paste Stack', inPasteStack(it.id), it.id)}
+          </div>
+          <div class="card-actions-right">
+            ${iconBtn('shortcut-btn', 'keyboard', it.shortcut ? 'Edit text shortcut' : 'Create text shortcut', !!it.shortcut, it.id)}
+            ${iconBtn('col-btn', 'folder', 'Add/remove in collections', false, it.id)}
+            ${iconBtn('del-btn', 'trash', 'Delete', false, it.id)}
+          </div>
+        </div>
       `;
     }
 
@@ -609,6 +648,158 @@ function render(list = []) {
   });
 
   setSelected(Math.min(selectedIndex, Math.max(0, list.length - 1)));
+  
+  // Add event listeners for editable headers
+  setupHeaderEditing();
+}
+
+function setupHeaderEditing() {
+  const cardTitles = resultsEl.querySelectorAll('.card-title');
+  cardTitles.forEach(titleEl => {
+    titleEl.addEventListener('blur', async () => {
+      const id = Number(titleEl.dataset.id);
+      const newHeader = titleEl.textContent.trim() || 'Untitled';
+      
+      // Update local data
+      const item = items.find(i => i.id === id);
+      if (item && item.header !== newHeader) {
+        item.header = newHeader;
+        try {
+          await window.api.updateHistoryItem(id, { header: newHeader });
+        } catch (err) {
+          console.error('[header] update error', err);
+        }
+      }
+    });
+    
+    titleEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        titleEl.blur();
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        // Restore original text
+        const id = Number(titleEl.dataset.id);
+        const item = items.find(i => i.id === id);
+        if (item) {
+          titleEl.textContent = item.header || 'Untitled';
+        }
+        titleEl.blur();
+      }
+    });
+  });
+}
+
+/* ---------- Expanded Text Popup ---------- */
+function showExpandedTextPopup(item) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = `
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 9999;
+      display: flex; align-items: center; justify-content: center; padding: 20px;`;
+
+    const popup = document.createElement('div');
+    popup.style.cssText = `
+      width: min(800px, 90vw); max-height: 80vh; background: var(--secondary);
+      border-radius: var(--border-radius); box-shadow: var(--shadow); padding: 24px;
+      display: flex; flex-direction: column; gap: 16px; position: relative;`;
+
+    popup.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 style="margin: 0; color: var(--text);">${escapeHTML(item.header || 'Untitled')}</h3>
+        <button id="close-popup" style="background: none; border: none; font-size: 18px; cursor: pointer; color: var(--text-dim);">×</button>
+      </div>
+      <div style="font-size: 12px; color: var(--text-dim);">
+        ${new Date(item.ts || Date.now()).toLocaleString()}${item.source ? ` • ${item.source.app ?? ''}` : ''}
+      </div>
+      <div style="flex: 1; overflow-y: auto; background: var(--primary); padding: 16px; border-radius: 8px; border: 1px solid var(--border);">
+        <div style="font-size: 14px; line-height: 1.6; color: var(--text); white-space: pre-wrap; word-break: break-word;">
+          ${escapeHTML(item.text || '')}
+        </div>
+      </div>
+    `;
+
+    backdrop.appendChild(popup);
+    document.body.appendChild(backdrop);
+
+    const closeBtn = popup.querySelector('#close-popup');
+    const close = () => {
+      try { document.body.removeChild(backdrop); } catch {}
+      resolve();
+    };
+
+    closeBtn.addEventListener('click', close);
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) close();
+    });
+
+    document.addEventListener('keydown', function escListener(e) {
+      if (e.key === 'Escape') {
+        document.removeEventListener('keydown', escListener);
+        close();
+      }
+    });
+  });
+}
+
+/* ---------- Info Popup ---------- */
+function showInfoPopup(item) {
+  return new Promise((resolve) => {
+    const backdrop = document.createElement('div');
+    backdrop.style.cssText = `
+      position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 9999;
+      display: flex; align-items: center; justify-content: center; padding: 20px;`;
+
+    const popup = document.createElement('div');
+    popup.style.cssText = `
+      width: min(600px, 90vw); background: var(--secondary);
+      border-radius: var(--border-radius); box-shadow: var(--shadow); padding: 24px;
+      position: relative;`;
+
+    const sourceInfo = item.source ? 
+      `<div><strong>Source App:</strong> ${escapeHTML(item.source.app || 'Unknown')}</div>
+       ${item.source.title ? `<div><strong>Window Title:</strong> ${escapeHTML(item.source.title)}</div>` : ''}` : 
+      '<div>No source information available</div>';
+
+    const sizeInfo = item.wh ? 
+      `<div><strong>Image Size:</strong> ${item.wh.w} × ${item.wh.h} pixels</div>` : '';
+
+    popup.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+        <h3 style="margin: 0; color: var(--text);">Item Details</h3>
+        <button id="close-info-popup" style="background: none; border: none; font-size: 18px; cursor: pointer; color: var(--text-dim);">×</button>
+      </div>
+      <div style="color: var(--text); line-height: 1.6; gap: 12px; display: flex; flex-direction: column;">
+        <div><strong>Created:</strong> ${new Date(item.ts || Date.now()).toLocaleString()}</div>
+        <div><strong>Type:</strong> ${item.type === 'image' ? 'Image' : 'Text'}</div>
+        ${sizeInfo}
+        ${sourceInfo}
+        ${item.filePath ? `<div><strong>File Path:</strong> <code style="background: var(--primary); padding: 2px 4px; border-radius: 4px; font-size: 12px;">${escapeHTML(item.filePath)}</code></div>` : ''}
+      </div>
+    `;
+
+    backdrop.appendChild(popup);
+    document.body.appendChild(backdrop);
+
+    const closeBtn = popup.querySelector('#close-info-popup');
+    const close = () => {
+      try { document.body.removeChild(backdrop); } catch {}
+      resolve();
+    };
+
+    closeBtn.addEventListener('click', close);
+    backdrop.addEventListener('click', (e) => {
+      if (e.target === backdrop) close();
+    });
+
+    document.addEventListener('keydown', function escListener(e) {
+      if (e.key === 'Escape') {
+        document.removeEventListener('keydown', escListener);
+        close();
+      }
+    });
+  });
 }
 
 /* ---------- Sidebar Tabs (with collections) ---------- */
@@ -616,23 +807,18 @@ function rebuildTabs() {
   if (!tabsEl) return;
   tabsEl.innerHTML = `
     <button class="sidebar-tab" data-tab="recent">
-      <span class="tab-icon">🕒</span>
       <span class="tab-label">Recent</span>
     </button>
     <button class="sidebar-tab" data-tab="images">
-      <span class="tab-icon">🖼️</span>
       <span class="tab-label">Images</span>
     </button>
     <button class="sidebar-tab" data-tab="urls">
-      <span class="tab-icon">🔗</span>
       <span class="tab-label">URLs</span>
     </button>
     <button class="sidebar-tab" data-tab="pinned">
-      <span class="tab-icon">📌</span>
       <span class="tab-label">Pinned</span>
     </button>
     <button class="sidebar-tab" data-tab="collections">
-      <span class="tab-icon">📁</span>
       <span class="tab-label">Collections</span>
     </button>
   `;
@@ -881,6 +1067,43 @@ resultsEl?.addEventListener('click', async (e) => {
       items = await window.api.getHistory();
       applyFilter();
     } catch (err) { console.error('[delete] error', err); }
+    return;
+  }
+
+  // Edit header button
+  const editHeaderBtn = e.target.closest('.edit-header-btn');
+  if (editHeaderBtn) {
+    e.preventDefault(); e.stopPropagation();
+    const id = Number(editHeaderBtn.dataset.id);
+    const titleEl = editHeaderBtn.parentElement.querySelector('.card-title');
+    if (titleEl) {
+      titleEl.focus();
+      titleEl.select();
+    }
+    return;
+  }
+
+  // Expand text button
+  const expandBtn = e.target.closest('.expand-btn');
+  if (expandBtn) {
+    e.preventDefault(); e.stopPropagation();
+    const id = Number(expandBtn.dataset.id);
+    const item = items.find(i => i.id === id);
+    if (item) {
+      showExpandedTextPopup(item);
+    }
+    return;
+  }
+
+  // Info button
+  const infoBtn = e.target.closest('.info-btn');
+  if (infoBtn) {
+    e.preventDefault(); e.stopPropagation();
+    const id = Number(infoBtn.dataset.id);
+    const item = items.find(i => i.id === id);
+    if (item) {
+      showInfoPopup(item);
+    }
     return;
   }
 
@@ -1279,7 +1502,7 @@ async function boot() {
     if (searchModeEl)  searchModeEl.value  = cfg.searchMode;
     if (fuzzyThreshEl) fuzzyThreshEl.value = String(cfg.fuzzyThreshold);
     if (autoPasteEl)   autoPasteEl.checked = !!cfg.autoPasteOnSelect;
-    if (overlaySizeEl) overlaySizeEl.value = cfg.overlaySize || 'large';
+    // overlaySize UI removed
     
     // Text shortcuts settings
     if (enableTextShortcutsEl) enableTextShortcutsEl.checked = !!cfg.enableTextShortcuts;
@@ -1387,7 +1610,7 @@ saveBtn?.addEventListener('click', async () => {
     searchMode: (searchModeEl?.value || cfg.searchMode),
     fuzzyThreshold: Number(fuzzyThreshEl?.value || cfg.fuzzyThreshold || 0.4),
     autoPasteOnSelect: !!(autoPasteEl?.checked ?? cfg.autoPasteOnSelect),
-    overlaySize: (overlaySizeEl?.value || cfg.overlaySize || 'large'),
+    // overlaySize removed
     // Text shortcuts settings
     enableTextShortcuts: !!(enableTextShortcutsEl?.checked ?? cfg.enableTextShortcuts),
     shortcutTriggerPrefix: (shortcutTriggerPrefixEl?.value || cfg.shortcutTriggerPrefix || '//'),
@@ -1398,7 +1621,7 @@ saveBtn?.addEventListener('click', async () => {
   cfg = { ...cfg, ...payload };
   try {
     await window.api.saveSettings(payload);
-    await window.api.resizeOverlay(payload.overlaySize); // apply size now
+    // resize removed - using single fixed size
   } catch {}
   settingsEl?.classList.remove('open');
   applyTheme(cfg.theme);

@@ -1,141 +1,45 @@
-/* Light Theme Overrides – using the same purple palette */
-html[data-theme="light"] {
-  --primary: #EEECFD;           /* page background */
-  --secondary: #DDDAFA;         /* secondary backgrounds */
-  --accent: #7452DC;            /* action/highlight */
-  --accent-hover: #6839D6;      /* deeper hover */
-  --success: #59A98C;           /* softened to fit palette */
-  --surface: #DDDAFA;           /* sidebar/panels */
-  --surface-elevated: #FFFFFF;  /* cards/items */
-  --bg: rgba(238, 236, 253, 0.95);
-  --bg-soft: rgba(204, 199, 247, 0.10);
-  --text: #2B2463;              /* deep readable violet */
-  --text-dim: #4E4594;
-  --text-muted: #8168E2;
-  --border: rgba(172, 162, 240, 0.35);
-  --border-subtle: rgba(188, 181, 244, 0.22);
-  --shadow: 0 25px 50px -12px rgba(38, 26, 84, 0.18);
-  --shadow-card: 0 4px 6px -1px rgba(38, 26, 84, 0.10), 0 2px 4px -1px rgba(38, 26, 84, 0.06);
-  --shadow-elevated: 0 10px 15px -3px rgba(38, 26, 84, 0.12), 0 4px 6px -2px rgba(38, 26, 84, 0.08);
+/* Light Theme Completely Disabled - Using Mockup Purple Theme Only */
+/* This file is now unused as we use the mockup design directly */
 
-  /* icons in light */
-  --icon: #4E4594;
-  --icon-muted: #9D8FEC;
-  --icon-active: #7452DC;
+html[data-theme="light"] {
+  /* All light theme variables now point to the mockup design */
+  --primary: #F8FAFC;         /* Light main background */
+  --secondary: #FFFFFF;       /* Card backgrounds */
+  --accent: #8B5CF6;          /* Purple buttons/highlights */
+  --accent-hover: #7C3AED;    /* Darker purple hover */
+  --success: #10B981;         /* Green success */
+  --surface: linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%); /* Purple gradient sidebar */
+  --surface-elevated: #FFFFFF; /* Card backgrounds */
+  --bg: rgba(248, 250, 252, 1); /* Main background */
+  --bg-soft: rgba(248, 250, 252, 0.8);
+  --text: #1F2937;            /* Dark text */
+  --text-dim: #6B7280;        /* Medium gray text */
+  --text-muted: #9CA3AF;      /* Light gray text */
+  --text-white: #FFFFFF;      /* White text for sidebar */
+  --border: #E5E7EB;          /* Light gray border */
+  --border-subtle: #F3F4F6;   /* Very light border */
+  --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
+  --shadow-elevated: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
 }
 
-html[data-theme="light"] body { background: #EEECFD; color: var(--text); }
+/* Force same styling as default theme */
+html[data-theme="light"] body { 
+  background: transparent; 
+  color: var(--text); 
+}
 
 html[data-theme="light"] .overlay {
-  background: var(--bg);
-  backdrop-filter: blur(20px) saturate(180%);
+  background: var(--primary);
   border: 1px solid var(--border);
   box-shadow: var(--shadow);
 }
 
-/* Sidebar */
-html[data-theme="light"] .sidebar {
-  background: linear-gradient(180deg, #DDDAFA 0%, #EEECFD 100%);
-  border-right: 1px solid var(--border);
-}
-html[data-theme="light"] .sidebar-tab { color: rgba(46, 38, 100, 0.86); }
-html[data-theme="light"] .sidebar-tab:hover {
-  background: rgba(204, 199, 247, 0.22);
-  color: var(--text);
-  transform: translateX(2px);
-}
-html[data-theme="light"] .sidebar-tab.active {
-  background: linear-gradient(135deg, #8F7CE7 0%, #7452DC 100%);
-  color: #FFFFFF;
-  box-shadow: 0 4px 12px rgba(116, 82, 220, 0.28);
-  border: 1px solid rgba(172, 162, 240, 0.45);
-}
-
-/* Toolbar */
 html[data-theme="light"] .toolbar {
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  background: transparent;
+  border-bottom: 1px solid var(--border-subtle);
 }
 
-/* Results area */
-html[data-theme="light"] .results { background: var(--primary); }
-
-/* Row states */
-html[data-theme="light"] .row:hover {
-  border-color: var(--accent);
-  background: rgba(204, 199, 247, 0.35);
-  box-shadow: 0 4px 8px rgba(116, 82, 220, 0.18);
-  transform: translateY(-1px);
+html[data-theme="light"] .results { 
+  background: transparent; 
 }
-html[data-theme="light"] .row.selected {
-  border-color: var(--accent);
-  box-shadow: 0 6px 16px rgba(116, 82, 220, 0.24);
-  background: rgba(204, 199, 247, 0.42);
-}
-
-/* Settings sheet */
-html[data-theme="light"] .sheet,
-html[data-theme="light"] .overlay #settings {
-  background: var(--surface);
-  color: var(--text);
-  border: 1px solid var(--border);
-  box-shadow: 0 16px 40px rgba(38, 26, 84, 0.16);
-}
-
-/* Toolbar buttons */
-html[data-theme="light"] .toolbar button {
-  border: 1px solid var(--border);
-  background: rgba(204, 199, 247, 0.12);
-  color: var(--text);
-}
-html[data-theme="light"] .toolbar button:hover {
-  background: var(--accent);
-  color: #fff;
-  border-color: var(--accent);
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(116, 82, 220, 0.22);
-}
-
-/* Sheet headings/inputs/buttons */
-html[data-theme="light"] .sheet h2,
-html[data-theme="light"] .sheet h3 { color: var(--text); }
-
-html[data-theme="light"] .sheet input[type="text"],
-html[data-theme="light"] .sheet input[type="number"],
-html[data-theme="light"] .sheet select {
-  background: rgba(204, 199, 247, 0.12);
-  color: var(--text);
-  border: 1px solid var(--border);
-}
-html[data-theme="light"] .sheet input::placeholder { color: var(--text-muted); }
-
-html[data-theme="light"] .sheet .actions button {
-  background: var(--accent);
-  color: white;
-  border: none;
-}
-html[data-theme="light"] .sheet .actions .ghost {
-  background: rgba(204, 199, 247, 0.14);
-  color: var(--text);
-  border: 1px solid var(--border);
-}
-
-/* Search highlight */
-html[data-theme="light"] .hl {
-  background: rgba(116, 82, 220, 0.22);
-  border-radius: 3px;
-  padding: 0 1px;
-}
-
-/* Scrollbar (optional, subtle) */
-html[data-theme="light"] *::-webkit-scrollbar { width: 10px; height: 10px; }
-html[data-theme="light"] *::-webkit-scrollbar-thumb {
-  background: #BCB5F4;
-  border-radius: 6px;
-}
-html[data-theme="light"] *::-webkit-scrollbar-thumb:hover { background: #7452DC; }
-
-/* --- SETTINGS SHEET OVERRIDES (light) --- */
-html[data-theme="light"] #settings .divider { background: #BCB5F4 !important; }
-html[data-theme="light"] #settings .rowline { color: #4E4594 !important; }
-html[data-theme="light"] #settings input[type="checkbox"] { accent-color: var(--accent); }

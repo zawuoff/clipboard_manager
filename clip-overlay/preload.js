@@ -108,8 +108,7 @@ contextBridge.exposeInMainWorld('api', {
   // Open URL
   openUrl: (url) => ipcRenderer.invoke('open-url', url),
 
-  //resize
-  resizeOverlay: (size) => ipcRenderer.invoke('overlay:resize', size),
+  // resize removed - using single fixed size
 
   // Collections
   collections: {
