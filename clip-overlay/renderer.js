@@ -29,6 +29,10 @@ const shortcutCaseSensitiveEl = $('#shortcutCaseSensitive');
 const shortcutMinLengthEl = $('#shortcutMinLength');
 const showShortcutNotificationsEl = $('#showShortcutNotifications');
 
+/* Smart Paste elements */
+const enableSmartPasteEl = $('#enableSmartPaste');
+const smartPasteHotkeyEl = $('#smartPasteHotkey');
+
 /* Sidebar tabs container */
 const tabsEl = document.querySelector('.sidebar-tabs');
 
@@ -380,7 +384,7 @@ async function openShortcutPrompt(item) {
         ${escapeHTML(previewText)}
       </div>
       <div style="opacity:.7; font-size:11px; margin-bottom:12px;">
-        Type <strong>${escapeHTML(cfg.shortcutTriggerPrefix || '//')}${escapeHTML(existingShortcut || 'shortcut')}</strong>, select it, and paste (Ctrl+V) to expand.
+        Type <strong>${escapeHTML(cfg.shortcutTriggerPrefix || '//')}${escapeHTML(existingShortcut || 'shortcut')}</strong>, select it, and press Smart Paste hotkey to expand instantly.
       </div>
       <input id="__shortcut_input" type="text" placeholder="e.g. email_temp_1, signature, addr"
              value="${escapeHTML(existingShortcut)}"
@@ -388,7 +392,7 @@ async function openShortcutPrompt(item) {
                     border:1px solid rgba(255,255,255,.08); background:rgba(255,255,255,.06); color:inherit;
                     font-family: monospace;" />
       <div id="__shortcut_preview" style="margin-top:8px; font-size:11px; opacity:.6;">
-        Preview: Type "${escapeHTML(cfg.shortcutTriggerPrefix || '//')}${escapeHTML(existingShortcut || 'your_shortcut')}", select + Ctrl+V → Expands
+        Preview: Type "${escapeHTML(cfg.shortcutTriggerPrefix || '//')}${escapeHTML(existingShortcut || 'your_shortcut')}", select + press Smart Paste hotkey → Expands
       </div>
       <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:16px;">
         ${existingShortcut ? '<button id="__shortcut_remove" style="padding:8px 12px; border-radius:8px; border:1px solid #ef4444; background:transparent; color:#ef4444;">Remove</button>' : ''}
@@ -409,8 +413,8 @@ async function openShortcutPrompt(item) {
       if (preview) {
         const prefix = cfg.shortcutTriggerPrefix || '//';
         preview.innerHTML = val 
-          ? `Preview: Type "${escapeHTML(prefix)}${escapeHTML(val)}", select + Ctrl+V → Expands`
-          : `Preview: Type "${escapeHTML(prefix)}your_shortcut", select + Ctrl+V → Expands`;
+          ? `Preview: Type "${escapeHTML(prefix)}${escapeHTML(val)}", select + press Smart Paste hotkey → Expands`
+          : `Preview: Type "${escapeHTML(prefix)}your_shortcut", select + press Smart Paste hotkey → Expands`;
       }
     };
 
@@ -1469,6 +1473,22 @@ hotkeyEl?.addEventListener('keydown', (e) => {
   }
 });
 
+// Smart Paste hotkey capture
+smartPasteHotkeyEl?.setAttribute('placeholder','Click, then press hotkey (e.g. F12)');
+smartPasteHotkeyEl?.addEventListener('focus', () => smartPasteHotkeyEl.select());
+smartPasteHotkeyEl?.addEventListener('keydown', (e) => {
+  const accel = eventToAccelerator(e);
+  if (accel) {
+    e.preventDefault();
+    smartPasteHotkeyEl.dataset.accelValue = accel;
+    smartPasteHotkeyEl.value = displayLabel(accel);
+  } else if (e.key === 'Escape') {
+    e.preventDefault();
+    delete smartPasteHotkeyEl.dataset.accelValue;
+    smartPasteHotkeyEl.value = '';
+  }
+});
+
 /* ---------- Theme ---------- */
 function applyTheme(theme) {
   document.documentElement.setAttribute('data-theme', theme === 'light' ? 'light' : 'dark');
@@ -1510,6 +1530,13 @@ async function boot() {
     if (shortcutCaseSensitiveEl) shortcutCaseSensitiveEl.checked = !!cfg.shortcutCaseSensitive;
     if (shortcutMinLengthEl) shortcutMinLengthEl.value = String(cfg.shortcutMinLength || 2);
     if (showShortcutNotificationsEl) showShortcutNotificationsEl.checked = !!cfg.showShortcutNotifications;
+    
+    // Smart Paste settings
+    if (enableSmartPasteEl) enableSmartPasteEl.checked = !!cfg.enableSmartPaste;
+    if (smartPasteHotkeyEl) {
+      smartPasteHotkeyEl.dataset.accelValue = cfg.smartPasteHotkey || 'F12';
+      smartPasteHotkeyEl.value = displayLabel(cfg.smartPasteHotkey || 'F12');
+    }
   } catch (e) {
     console.warn('[renderer] getSettings failed:', e?.message);
   }
@@ -1617,6 +1644,10 @@ saveBtn?.addEventListener('click', async () => {
     shortcutCaseSensitive: !!(shortcutCaseSensitiveEl?.checked ?? cfg.shortcutCaseSensitive),
     shortcutMinLength: Number(shortcutMinLengthEl?.value || cfg.shortcutMinLength || 2),
     showShortcutNotifications: !!(showShortcutNotificationsEl?.checked ?? cfg.showShortcutNotifications),
+    
+    // Smart Paste settings
+    enableSmartPaste: !!(enableSmartPasteEl?.checked ?? cfg.enableSmartPaste),
+    smartPasteHotkey: (smartPasteHotkeyEl?.dataset?.accelValue || smartPasteHotkeyEl?.value || cfg.smartPasteHotkey || 'F12'),
   };
   cfg = { ...cfg, ...payload };
   try {

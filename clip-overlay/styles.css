@@ -27,9 +27,9 @@
   --border-radius-sm: 8px;
   --border-radius-lg: 20px;
   
-  /* Animation Variables */
-  --transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  --transition-slow: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  /* Animation Variables - Optimized for no jitter */
+  --transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 html, body {
@@ -131,10 +131,11 @@ html, body {
   position: relative;
 }
 
+/* FIXED: Remove transform for no jitter, use opacity only */
 .sidebar-tab:hover {
   background: rgba(255, 255, 255, 0.1);
   color: var(--text-white);
-  transform: translateX(2px);
+  opacity: 1;
 }
 
 .sidebar-tab.active {
@@ -188,7 +189,7 @@ html, body {
 .request-feature-link:hover {
   background: rgba(255, 255, 255, 0.05);
   color: var(--text-white);
-  transform: translateX(2px);
+  opacity: 1;
 }
 
 /* ========== Main Content Wrapper ========== */
@@ -257,16 +258,17 @@ html, body {
   gap: 8px;
 }
 
+/* FIXED: Remove translateY transform to prevent jitter */
 .toolbar button:hover {
   background: var(--accent);
   color: white;
   border-color: var(--accent);
-  transform: translateY(-1px);
   box-shadow: 0 4px 8px rgba(59, 130, 246, 0.2);
+  opacity: 1;
 }
 
 .toolbar button:active {
-  transform: translateY(0);
+  opacity: 0.9;
 }
 
 /* ========== Results list ========== */
@@ -283,6 +285,7 @@ html, body {
   align-content: start;
 }
 
+/* FIXED: Deterministic card layout with no hover jitter */
 .row {
   background: var(--secondary);
   border: 1px solid var(--border);
@@ -296,14 +299,16 @@ html, body {
   box-shadow: var(--shadow-card);
   display: flex;
   flex-direction: column;
-  height: 240px;
+  min-height: 240px; /* Fixed minimum height */
+  max-height: 340px; /* Fixed maximum height */
 }
 
+/* FIXED: No transform, only shadow and border changes for performance */
 .row:hover {
   border-color: var(--accent);
   background: var(--secondary);
   box-shadow: var(--shadow-elevated);
-  transform: translateY(-2px);
+  will-change: box-shadow; /* GPU acceleration hint */
 }
 
 .row.selected {
@@ -343,12 +348,16 @@ html, body {
   min-height: 16px;
 }
 
-/* Card Header */
+/* ========== DETERMINISTIC CARD LAYOUTS ========== */
+
+/* Card Header - Row 1: Title + Edit Control */
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   margin-bottom: 8px;
+  min-height: 24px; /* Fixed height */
+  flex-shrink: 0;
 }
 
 .card-title {
@@ -362,6 +371,7 @@ html, body {
   border-radius: 4px;
   padding: 2px 4px;
   transition: var(--transition);
+  line-height: 1.2;
 }
 
 .card-title:hover,
@@ -379,24 +389,31 @@ html, body {
   padding: 4px;
   border-radius: 4px;
   transition: var(--transition);
+  flex-shrink: 0;
 }
 
 .edit-header-btn:hover {
   background-color: var(--border-subtle);
   color: var(--accent);
+  opacity: 1;
 }
 
-/* Card Metadata */
+/* Card Metadata - Row 2: Timestamp + Info Icon */
 .card-metadata {
   font-size: 12px;
   color: var(--text-dim);
   margin-bottom: 12px;
+  min-height: 16px; /* Fixed height */
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
-/* Card Content */
+/* Card Content - Row 3: Main Content Area (Image or Text) */
 .card-content {
   flex: 1;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
   display: flex;
   gap: 12px;
   align-items: flex-start;
@@ -404,6 +421,13 @@ html, body {
   overflow: hidden;
 }
 
+/* IMAGE CARD LAYOUT */
+.row.image .card-content {
+  justify-content: center;
+  align-items: center;
+}
+
+/* TEXT CARD LAYOUT */
 .card-content .primary {
   font-size: 13px;
   line-height: 1.4;
@@ -411,9 +435,10 @@ html, body {
   word-break: break-word;
   overflow: hidden;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 4; /* Show more lines in fixed height */
   -webkit-box-orient: vertical;
   flex: 1;
+  max-height: 100px; /* Fixed max height for text area */
 }
 
 .image-info {
@@ -459,17 +484,17 @@ html, body {
   border-color: rgba(255, 255, 255, 0.3);
 }
 
-/* Card Actions Section */
+/* Card Actions - Row 5: Action Buttons */
 .card-actions {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 6px;
+  gap: 8px;
   margin-top: auto;
   padding-top: 8px;
   border-top: 1px solid var(--border-subtle);
   flex-shrink: 0;
-  min-height: 32px;
+  min-height: 36px; /* Fixed height */
 }
 
 .card-actions-left {
@@ -484,13 +509,15 @@ html, body {
   gap: 6px;
 }
 
+/* ========== ICON BUTTONS - Fixed for no jitter ========== */
 .icon-btn {
-  height: 24px;
+  height: 28px;
+  min-width: 28px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 8px;
-  border-radius: 999px;
+  padding: 6px;
+  border-radius: var(--border-radius-sm);
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -501,15 +528,15 @@ html, body {
   cursor: pointer;
   transition: var(--transition);
   opacity: 0.9;
-  margin: 0 4px;
+  flex-shrink: 0;
 }
 
+/* FIXED: Remove scale transform, use opacity only */
 .icon-btn:hover {
   background: var(--accent);
   color: white;
   border-color: var(--accent);
   opacity: 1;
-  transform: scale(1.05);
   box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);
 }
 
@@ -597,11 +624,12 @@ html, body {
   box-shadow: var(--shadow-card);
   transition: var(--transition);
 }
+/* FIXED: Remove translateY for no jitter */
 #settings .actions button:hover { 
   background: var(--accent); 
   color: white;
-  transform: translateY(-1px);
   box-shadow: var(--shadow-elevated);
+  opacity: 1;
 }
 #settings .actions button.ghost {
   background: transparent;
@@ -659,7 +687,7 @@ html, body {
 
 .thumbwrap {
   width: 100%;
-  height: 90px;
+  height: 120px; /* Fixed height for consistency */
   padding: 6px;
   border-radius: var(--border-radius);
   background: var(--secondary);
@@ -669,21 +697,20 @@ html, body {
   display: flex;
   align-items: center;
   justify-content: center;
-  margin-bottom: 8px;
 }
 
 .thumb {
   display: block;
   max-width: 100%;
   max-height: 100%;
-  object-fit: cover;
-  border-radius: 4px;
+  object-fit: contain; /* Preserve aspect ratio, no distortion */
   border-radius: var(--border-radius-sm);
   transition: var(--transition);
 }
 
+/* FIXED: Use opacity for hover effect, not scale */
 .row.image:hover .thumb {
-  transform: scale(1.02);
+  opacity: 0.95;
 }
 
 /* Search highlights */
@@ -732,17 +759,7 @@ html, body {
 
 /* …everything in your original styles.css is kept… */
 
-/* === Tag pills === */
-.tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-  align-items: center;
-  margin: 4px 0 6px 0;
-  min-height: 16px;
-  max-height: 32px;
-  overflow: hidden;
-}
+/* === Tag pills - already defined above === */
 
 .tag {
   display: inline-flex;
@@ -767,9 +784,9 @@ html, body {
   white-space: nowrap;
 }
 
+/* FIXED: Remove translateY transform for no jitter */
 .tag:hover {
   opacity: 1;
-  transform: translateY(-1px);
   box-shadow: var(--shadow-card);
 }
 
@@ -953,8 +970,12 @@ html, body {
 }
 .meta .icon-btn:first-child{ margin-left:0; }
 
-.icon-btn:hover{ background:rgba(255,255,255,.06); border-color:rgba(255,255,255,.08); opacity:1; }
-.icon-btn:active{ transform:translateY(0.5px); }
+.icon-btn:hover{ 
+  background:rgba(255,255,255,.06); 
+  border-color:rgba(255,255,255,.08); 
+  opacity:1; 
+}
+.icon-btn:active{ opacity: 0.8; }
 .icon-btn:focus-visible{ outline:2px solid #3b82f6; outline-offset:2px; }
 
 .icon{ width:var(--icon-size); height:var(--icon-size); display:block; }
@@ -981,13 +1002,14 @@ html, body {
   box-shadow: 0 4px 12px rgba(5, 150, 105, 0.3);
 }
 
+/* FIXED: Remove translateY transform */
 .stack-chip:hover {
-  transform: translateY(-1px);
   box-shadow: var(--shadow-elevated);
+  opacity: 0.95;
 }
 
 .stack-chip:active {
-  transform: translateY(0);
+  opacity: 0.9;
 }
 
 .stack-chip .stack-icon {

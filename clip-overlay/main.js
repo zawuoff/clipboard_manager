@@ -86,6 +86,8 @@ const settingsStore = new Store({
     shortcutCaseSensitive: false,
     shortcutMinLength: 2,
     showShortcutNotifications: true,
+    smartPasteHotkey: 'F12',
+    enableSmartPaste: true,
   },
 });
 const historyStore = new Store({ name: 'history', defaults: { items: [] } });
@@ -478,6 +480,11 @@ function startClipboardPolling() {
   }, 200);
 }
 
+/* ---------- AutoHotkey Smart Paste Integration v2 ---------- */
+let ahkProcess = null;
+let shortcutsFilePath = null;
+let ahkConfigPath = null;
+
 /* ---------- Global text monitoring for shortcuts ---------- */
 let textBuffer = '';
 let lastKeystroke = 0;
@@ -766,6 +773,7 @@ ipcMain.handle('history:clear', async () => {
 
   // clear all shortcuts
   setShortcutsMapping({});
+  updateShortcutsFile().catch(() => {});
 
   return true;
 });
@@ -834,6 +842,273 @@ function setCollections(list) { collectionsStore.set('list', list); }
 function getShortcutsMapping() { return shortcutsStore.get('mapping') || {}; }
 function setShortcutsMapping(mapping) { shortcutsStore.set('mapping', mapping); }
 
+/* ---------- AutoHotkey Management ---------- */
+async function initShortcutsFile() {
+  shortcutsFilePath = path.join(__dirname, 'shortcuts.json');
+  await updateShortcutsFile();
+  registerExpansionHotkey();
+}
+
+// Register the expansion hotkey using Electron's global shortcut system
+let expansionHotkey = 'F12';
+
+function registerExpansionHotkey() {
+  if (!settingsStore.get('enableSmartPaste')) return;
+  
+  const hotkey = settingsStore.get('smartPasteHotkey') || 'F12';
+  
+  try {
+    // Unregister previous hotkey
+    globalShortcut.unregister(expansionHotkey);
+    
+    // Register new hotkey
+    expansionHotkey = hotkey;
+    const success = globalShortcut.register(hotkey, handleExpansionHotkey);
+    
+    if (success) {
+      dlog('expansion:hotkey:registered', { hotkey });
+    } else {
+      // Fallback to F12
+      expansionHotkey = 'F12';
+      globalShortcut.register('F12', handleExpansionHotkey);
+      dlog('expansion:hotkey:fallback', { original: hotkey, fallback: 'F12' });
+    }
+  } catch (error) {
+    dlog('expansion:hotkey:error', { error: error.message });
+  }
+}
+
+// Handle the one-key expansion hotkey - Simple approach: just do Ctrl+C then Ctrl+V
+async function handleExpansionHotkey() {
+  if (!settingsStore.get('enableSmartPaste')) return;
+  
+  dlog('smart-paste:triggered');
+  
+  try {
+    // Simple and reliable: let the existing clipboard monitor handle shortcut detection
+    // Just send Ctrl+C followed by Ctrl+V
+    
+    dlog('smart-paste:sending-copy');
+    await sendKeystroke('ctrl+c');
+    
+    // Brief pause to let the clipboard monitoring system process the shortcut
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    dlog('smart-paste:sending-paste');
+    await sendKeystroke('ctrl+v');
+    
+    dlog('smart-paste:completed');
+    
+  } catch (error) {
+    dlog('smart-paste:error', { error: error.message });
+  }
+}
+
+// Send keystroke using Windows PowerShell - with multiple approaches
+async function sendKeystroke(keys) {
+  return new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      resolve();
+      return;
+    }
+
+    let psCommand = '';
+    
+    if (keys === 'ctrl+c') {
+      // Try a different approach: use WScript.Shell SendKeys which is often more reliable
+      psCommand = `
+try {
+  # Method 1: Try SendKeys (often more reliable)
+  Add-Type -AssemblyName System.Windows.Forms
+  [System.Windows.Forms.SendKeys]::SendWait("^c")
+  Write-Output "SendKeys-SUCCESS"
+} catch {
+  Write-Output "SendKeys-FAILED: $($_.Exception.Message)"
+  
+  # Method 2: Fallback to SendInput
+  try {
+    $code = @'
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+public static class K {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct INPUT { public uint type; public InputUnion U; }
+  [StructLayout(LayoutKind.Explicit)]
+  public struct InputUnion { [FieldOffset(0)] public KEYBDINPUT ki; }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+  [DllImport("user32.dll")] public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
+  public const uint INPUT_KEYBOARD = 1;
+  public const uint KEYEVENTF_KEYUP = 0x0002;
+  public const ushort VK_CONTROL = 0x11;
+  public const ushort VK_C = 0x43;
+  public static string Copy() {
+    try {
+      IntPtr activeWindow = GetForegroundWindow();
+      if (activeWindow == IntPtr.Zero || !IsWindow(activeWindow)) {
+        return "ERROR: No valid active window";
+      }
+      
+      SetForegroundWindow(activeWindow);
+      Thread.Sleep(50);
+      
+      var ctrlDown = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_CONTROL } } };
+      var cDown = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_C } } };
+      var cUp = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_C, dwFlags = KEYEVENTF_KEYUP } } };
+      var ctrlUp = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_CONTROL, dwFlags = KEYEVENTF_KEYUP } } };
+      
+      uint result1 = SendInput(1, new INPUT[] { ctrlDown }, System.Runtime.InteropServices.Marshal.SizeOf(typeof(INPUT)));
+      Thread.Sleep(10);
+      uint result2 = SendInput(1, new INPUT[] { cDown }, System.Runtime.InteropServices.Marshal.SizeOf(typeof(INPUT)));
+      Thread.Sleep(10);
+      uint result3 = SendInput(1, new INPUT[] { cUp }, System.Runtime.InteropServices.Marshal.SizeOf(typeof(INPUT)));
+      Thread.Sleep(10);
+      uint result4 = SendInput(1, new INPUT[] { ctrlUp }, System.Runtime.InteropServices.Marshal.SizeOf(typeof(INPUT)));
+      
+      return $"SendInput-SUCCESS: {result1},{result2},{result3},{result4}";
+    } catch (Exception ex) {
+      return $"SendInput-ERROR: {ex.Message}";
+    }
+  }
+}
+'@
+    Add-Type -TypeDefinition $code -Language CSharp
+    $result = [K]::Copy()
+    Write-Output $result
+  } catch {
+    Write-Output "SendInput-FAILED: $($_.Exception.Message)"
+  }
+}`.trim();
+    } else if (keys === 'ctrl+v') {
+      psCommand = `
+try {
+  # Method 1: Try SendKeys (often more reliable)
+  Add-Type -AssemblyName System.Windows.Forms
+  [System.Windows.Forms.SendKeys]::SendWait("^v")
+  Write-Output "SendKeys-SUCCESS"
+} catch {
+  Write-Output "SendKeys-FAILED: $($_.Exception.Message)"
+  
+  # Method 2: Fallback to SendInput
+  try {
+    $code = @'
+using System;
+using System.Runtime.InteropServices;
+using System.Threading;
+public static class K {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct INPUT { public uint type; public InputUnion U; }
+  [StructLayout(LayoutKind.Explicit)]
+  public struct InputUnion { [FieldOffset(0)] public KEYBDINPUT ki; }
+  [StructLayout(LayoutKind.Sequential)]
+  public struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+  [DllImport("user32.dll")] public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr hWnd);
+  public const uint INPUT_KEYBOARD = 1;
+  public const uint KEYEVENTF_KEYUP = 0x0002;
+  public const ushort VK_CONTROL = 0x11;
+  public const ushort VK_V = 0x56;
+  public static string Paste() {
+    try {
+      IntPtr activeWindow = GetForegroundWindow();
+      if (activeWindow == IntPtr.Zero || !IsWindow(activeWindow)) {
+        return "ERROR: No valid active window";
+      }
+      
+      SetForegroundWindow(activeWindow);
+      Thread.Sleep(50);
+      
+      var ctrlDown = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_CONTROL } } };
+      var vDown = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_V } } };
+      var vUp = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_V, dwFlags = KEYEVENTF_KEYUP } } };
+      var ctrlUp = new INPUT { type = INPUT_KEYBOARD, U = new InputUnion { ki = new KEYBDINPUT { wVk = VK_CONTROL, dwFlags = KEYEVENTF_KEYUP } } };
+      
+      uint result1 = SendInput(1, new INPUT[] { ctrlDown }, System.Runtime.InteropServices.Marshal.SizeOf(typeof(INPUT)));
+      Thread.Sleep(10);
+      uint result2 = SendInput(1, new INPUT[] { vDown }, System.Runtime.InteropServices.Marshal.SizeOf(typeof(INPUT)));
+      Thread.Sleep(10);
+      uint result3 = SendInput(1, new INPUT[] { vUp }, System.Runtime.InteropServices.Marshal.SizeOf(typeof(INPUT)));
+      Thread.Sleep(10);
+      uint result4 = SendInput(1, new INPUT[] { ctrlUp }, System.Runtime.InteropServices.Marshal.SizeOf(typeof(INPUT)));
+      
+      return $"SendInput-SUCCESS: {result1},{result2},{result3},{result4}";
+    } catch (Exception ex) {
+      return $"SendInput-ERROR: {ex.Message}";
+    }
+  }
+}
+'@
+    Add-Type -TypeDefinition $code -Language CSharp
+    $result = [K]::Paste()
+    Write-Output $result
+  } catch {
+    Write-Output "SendInput-FAILED: $($_.Exception.Message)"
+  }
+}`.trim();
+    }
+    
+    const pr = spawn('powershell.exe', 
+      ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', psCommand],
+      { windowsHide: true });
+    
+    let output = '';
+    let errorOutput = '';
+    
+    pr.stdout?.on('data', (data) => {
+      output += data.toString();
+    });
+    
+    pr.stderr?.on('data', (data) => {
+      errorOutput += data.toString();
+    });
+    
+    pr.on('exit', (code) => {
+      dlog(`keystroke:${keys}:result`, { 
+        exitCode: code, 
+        output: output.trim(), 
+        error: errorOutput.trim() || null 
+      });
+      resolve();
+    });
+    
+    pr.on('error', (err) => {
+      dlog(`keystroke:${keys}:error`, { error: err.message });
+      resolve();
+    });
+  });
+}
+
+async function updateShortcutsFile() {
+  if (!shortcutsFilePath) return;
+  
+  try {
+    // Get current shortcuts mapping
+    const mapping = getShortcutsMapping();
+    
+    // Create reverse mapping from shortcut keyword to item ID
+    const shortcutsData = {};
+    Object.keys(mapping).forEach(keyword => {
+      const itemId = mapping[keyword];
+      shortcutsData[keyword] = itemId;
+    });
+    
+    // Write to JSON file for AHK to read
+    await fsp.writeFile(shortcutsFilePath, JSON.stringify(shortcutsData, null, 2), 'utf8');
+    dlog('shortcuts:file:updated', { count: Object.keys(shortcutsData).length, path: shortcutsFilePath });
+    
+  } catch (error) {
+    dlog('shortcuts:file:error', { error: error.message });
+  }
+}
+
+// AHK functions removed - using Electron global shortcuts instead
+
 function updateShortcutMapping(itemId, oldShortcut, newShortcut) {
   const mapping = getShortcutsMapping();
   
@@ -855,6 +1130,11 @@ function updateShortcutMapping(itemId, oldShortcut, newShortcut) {
   
   setShortcutsMapping(mapping);
   dlog('shortcut:mapping', { oldShortcut, newShortcut, itemId, totalShortcuts: Object.keys(mapping).length });
+  
+  // Update shortcuts file for AHK
+  updateShortcutsFile().catch(err => {
+    dlog('shortcut:file:update:error', { error: err.message });
+  });
 }
 
 function cleanupShortcuts(validItemIds) {
@@ -872,6 +1152,11 @@ function cleanupShortcuts(validItemIds) {
   if (changed) {
     setShortcutsMapping(mapping);
     dlog('shortcut:cleanup', { removedOrphans: changed });
+    
+    // Update shortcuts file for AHK
+    updateShortcutsFile().catch(err => {
+      dlog('shortcut:file:cleanup:error', { error: err.message });
+    });
   }
 }
 
@@ -1025,6 +1310,8 @@ ipcMain.handle('settings:get', () => ({
   shortcutCaseSensitive: settingsStore.get('shortcutCaseSensitive'),
   shortcutMinLength: settingsStore.get('shortcutMinLength'),
   showShortcutNotifications: settingsStore.get('showShortcutNotifications'),
+  smartPasteHotkey: settingsStore.get('smartPasteHotkey'),
+  enableSmartPaste: settingsStore.get('enableSmartPaste'),
 }));
 ipcMain.handle('settings:save', async (_e, s) => {
   settingsStore.set('theme', s.theme === 'light' ? 'light' : 'dark');
@@ -1055,6 +1342,13 @@ ipcMain.handle('settings:save', async (_e, s) => {
     const prefix = String(s.shortcutTriggerPrefix || '//').trim();
     settingsStore.set('shortcutTriggerPrefix', prefix || '//');
   }
+  if (Object.prototype.hasOwnProperty.call(s, 'smartPasteHotkey')) {
+    const hotkey = String(s.smartPasteHotkey || 'Ctrl+Space').trim();
+    settingsStore.set('smartPasteHotkey', hotkey || 'Ctrl+Space');
+  }
+  if (Object.prototype.hasOwnProperty.call(s, 'enableSmartPaste')) {
+    settingsStore.set('enableSmartPaste', !!s.enableSmartPaste);
+  }
   
   registerHotkey();
 
@@ -1067,6 +1361,9 @@ ipcMain.handle('settings:save', async (_e, s) => {
   // Restart text monitoring if settings changed
   stopTextMonitoring();
   startTextMonitoring();
+  
+  // Update expansion hotkey
+  registerExpansionHotkey();
   
   return true;
 });
@@ -1189,6 +1486,9 @@ else {
   app.whenReady().then(async () => {
     dlog('app:ready', { userData: app.getPath('userData') });
     
+    // Initialize shortcuts file
+    await initShortcutsFile();
+    
     // Cleanup orphaned shortcuts on startup
     const items = historyStore.get('items') || [];
     const validIds = items.map(i => i.id);
@@ -1199,10 +1499,15 @@ else {
     startClipboardPolling();
     if (settingsStore.get('captureContext')) await startActiveWinSampling();
     startTextMonitoring();
+    
+    // Register expansion hotkey
+    if (settingsStore.get('enableTextShortcuts') && settingsStore.get('enableSmartPaste')) {
+      registerExpansionHotkey();
+    }
   });
   app.on('will-quit', () => { 
     globalShortcut.unregisterAll(); 
     stopActiveWinSampling(); 
-    stopTextMonitoring(); 
+    stopTextMonitoring();
   });
 }

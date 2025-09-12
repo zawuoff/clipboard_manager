@@ -16,6 +16,13 @@
       "!dist/**",                        
       "!out/**"
     ],
+    "extraFiles": [
+      "smart_paste.ahk",
+      "smart_paste_v2.ahk", 
+      "ahk_content_loader.js",
+      "shortcuts.json",
+      "smart_paste_config.ini"
+    ],
     "asar": true,
     "asarUnpack": [
       "**/*.node",
