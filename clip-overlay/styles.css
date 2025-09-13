@@ -1,25 +1,25 @@
 /* ========== Reset & base ========== */
 * { box-sizing: border-box; }
 :root {
-  /* Mockup-Based Color Palette - Purple Theme */
-  --primary: #F8FAFC;         /* Light main background */
-  --secondary: #FFFFFF;       /* Card backgrounds */
-  --accent: #8B5CF6;          /* Purple buttons/highlights */
-  --accent-hover: #7C3AED;    /* Darker purple hover */
+  /* Dark Theme Color Palette - Extracted from Screenshot */
+  --primary: #0f172a;         /* Very dark slate main background */
+  --secondary: #334155;       /* Dark slate card backgrounds */
+  --accent: #fbbf24;          /* Amber yellow buttons/highlights */
+  --accent-hover: #f59e0b;    /* Darker amber yellow hover */
   --success: #10B981;         /* Green success */
-  --surface: linear-gradient(135deg, #8B5CF6 0%, #6D28D9 100%); /* Purple gradient sidebar */
-  --surface-elevated: #FFFFFF; /* Card backgrounds */
-  --bg: rgba(248, 250, 252, 1); /* Main background */
-  --bg-soft: rgba(248, 250, 252, 0.8);
-  --text: #1F2937;            /* Dark text */
-  --text-dim: #6B7280;        /* Medium gray text */
-  --text-muted: #9CA3AF;      /* Light gray text */
-  --text-white: #FFFFFF;      /* White text for sidebar */
-  --border: #E5E7EB;          /* Light gray border */
-  --border-subtle: #F3F4F6;   /* Very light border */
-  --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
-  --shadow-elevated: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+  --surface: #1e293b;         /* Dark slate sidebar background */
+  --surface-elevated: #334155; /* Dark slate elevated card backgrounds */
+  --bg: #0f172a;              /* Main background */
+  --bg-soft: rgba(15, 23, 42, 0.9);
+  --text: #f8fafc;            /* Light text */
+  --text-dim: #cbd5e1;        /* Light gray text */
+  --text-muted: #94a3b8;      /* Medium gray text */
+  --text-white: #ffffff;      /* White text */
+  --border: #475569;          /* Slate border */
+  --border-subtle: #3f4c5b;   /* Subtle dark border */
+  --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+  --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.3), 0 1px 2px 0 rgba(0, 0, 0, 0.2);
+  --shadow-elevated: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -1px rgba(0, 0, 0, 0.2);
   
   /* Layout Variables */
   --sidebar-width: 240px;
@@ -950,14 +950,9 @@ html, body {
 /* === App-wide icon styling === */
 :root{
   --icon-size: 18px;
-  --icon: #d6d3d1;
-  --icon-muted: #a8a29e;
-  --icon-active: #f59e0b;
-}
-[data-theme="light"]{
-  --icon: #334155;
-  --icon-muted: #64748b;
-  --icon-active: #3B82F6;
+  --icon: #e2e8f0;
+  --icon-muted: #94a3b8;
+  --icon-active: #fbbf24;
 }
 
 .icon-btn{

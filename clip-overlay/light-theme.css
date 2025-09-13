@@ -1,8 +1,8 @@
-/* Light Theme Completely Disabled - Using Mockup Purple Theme Only */
-/* This file is now unused as we use the mockup design directly */
+/* Light Theme - Moved from styles.css */
+/* This contains the original light purple theme as light mode */
 
 html[data-theme="light"] {
-  /* All light theme variables now point to the mockup design */
+  /* Mockup-Based Color Palette - Purple Theme (Light Mode) */
   --primary: #F8FAFC;         /* Light main background */
   --secondary: #FFFFFF;       /* Card backgrounds */
   --accent: #8B5CF6;          /* Purple buttons/highlights */
@@ -21,6 +21,21 @@ html[data-theme="light"] {
   --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
   --shadow-card: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px 0 rgba(0, 0, 0, 0.06);
   --shadow-elevated: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+
+  /* Layout Variables */
+  --sidebar-width: 240px;
+  --border-radius: 16px;
+  --border-radius-sm: 8px;
+  --border-radius-lg: 20px;
+
+  /* Animation Variables - Optimized for no jitter */
+  --transition: opacity 0.2s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-slow: opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Icon variables for light theme */
+  --icon: #334155;
+  --icon-muted: #64748b;
+  --icon-active: #3B82F6;
 }
 
 /* Force same styling as default theme */
