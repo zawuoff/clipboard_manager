@@ -131,4 +131,9 @@ shortcuts: {
   expand: (keyword) => ipcRenderer.invoke('shortcut:expand', keyword),
 },
 
+// Performance monitoring
+perf: {
+  getStats: () => ipcRenderer.invoke('perf:getStats'),
+},
+
 });

@@ -15,6 +15,8 @@ const clearBtn    = $('#clearBtn');
 const settingsBtn = $('#settingsBtn');
 const saveBtn     = $('#saveSettings');
 const closeBtn    = $('#closeSettings');
+const refreshPerfBtn = $('#refreshPerfBtn');
+const perfMonitorEl = $('#perfMonitor');
 
 const searchModeEl  = $('#searchMode');
 const fuzzyThreshEl = $('#fuzzyThreshold');
@@ -82,46 +84,113 @@ function isUrlItem(it) {
 }
 const uniq = (arr) => Array.from(new Set((arr || []).filter(Boolean).map(s => String(s).toLowerCase())));
 
-/* ---------- Fuzzy matching ---------- */
+/* ---------- Optimized Fuzzy matching with memoization ---------- */
+const fuzzyMatchCache = new Map();
+const MAX_CACHE_SIZE = 1000;
+let cacheHits = 0;
+let cacheMisses = 0;
+
+function clearOldCacheEntries() {
+  if (fuzzyMatchCache.size > MAX_CACHE_SIZE) {
+    const entries = Array.from(fuzzyMatchCache.entries());
+    // Remove oldest 25% of entries
+    const toRemove = Math.floor(entries.length * 0.25);
+    for (let i = 0; i < toRemove; i++) {
+      fuzzyMatchCache.delete(entries[i][0]);
+    }
+  }
+}
+
 function fuzzyMatch(hayRaw = '', qRaw = '') {
   const hay = String(hayRaw);
-  const q   = String(qRaw);
+  const q = String(qRaw);
+  
   if (!q) return { score: 1, pos: new Set() };
-
+  
+  // Create cache key
+  const cacheKey = `${hay.slice(0, 100)}|${q}`; // Limit haystack length for cache key
+  
+  // Check cache first
+  if (fuzzyMatchCache.has(cacheKey)) {
+    cacheHits++;
+    return fuzzyMatchCache.get(cacheKey);
+  }
+  
+  cacheMisses++;
+  
   const hayL = hay.toLowerCase();
-  const qL   = q.toLowerCase();
-  const len  = hayL.length;
+  const qL = q.toLowerCase();
+  const len = hayL.length;
   const qlen = qL.length;
 
+  let result;
+
+  // Exact substring match (fastest path)
   const idx = hayL.indexOf(qL);
   if (idx >= 0) {
     const pos = new Set();
     for (let i = idx; i < idx + qlen && i < len; i++) pos.add(i);
     const startBonus = 1 - (idx / Math.max(1, len));
     const tightBonus = Math.min(1, qlen / Math.max(qlen, 12));
-    const score = Math.min(1, 0.65 + 0.25*startBonus + 0.10*tightBonus);
-    return { score, pos };
-  }
-
-  let i = 0, j = 0, first = -1, last = -1;
-  const pos = new Set();
-  while (i < len && j < qlen) {
-    if (hayL[i] === qL[j]) {
-      if (first < 0) first = i;
-      last = i;
-      pos.add(i);
-      j++;
+    const score = Math.min(1, 0.65 + 0.25 * startBonus + 0.10 * tightBonus);
+    result = { score, pos };
+  } else {
+    // Fuzzy subsequence matching
+    let i = 0, j = 0, first = -1, last = -1;
+    const pos = new Set();
+    
+    while (i < len && j < qlen) {
+      if (hayL[i] === qL[j]) {
+        if (first < 0) first = i;
+        last = i;
+        pos.add(i);
+        j++;
+      }
+      i++;
     }
-    i++;
+    
+    if (j < qlen) {
+      result = { score: 0, pos: new Set() };
+    } else {
+      const span = (last - first + 1);
+      const density = qlen / span;
+      const startBonus = 1 - (first / Math.max(1, len));
+      const gapPenalty = (span - qlen) / span;
+      const score = Math.max(0, Math.min(1, 0.6 * density + 0.3 * startBonus + 0.1 * (1 - gapPenalty)));
+      result = { score, pos };
+    }
   }
-  if (j < qlen) return { score: 0, pos: new Set() };
+  
+  // Cache the result
+  fuzzyMatchCache.set(cacheKey, result);
+  clearOldCacheEntries();
+  
+  return result;
+}
 
-  const span = (last - first + 1);
-  const density = qlen / span;
-  const startBonus = 1 - (first / Math.max(1, len));
-  const gapPenalty = (span - qlen) / span;
-  const score = Math.max(0, Math.min(1, 0.6*density + 0.3*startBonus + 0.1*(1-gapPenalty)));
-  return { score, pos };
+// Performance monitoring for search
+let searchStats = {
+  totalSearches: 0,
+  avgSearchTime: 0,
+  lastResetTime: Date.now()
+};
+
+function updateSearchStats(searchTime) {
+  searchStats.totalSearches++;
+  searchStats.avgSearchTime = (searchStats.avgSearchTime + searchTime) / 2;
+  
+  const now = Date.now();
+  if (now - searchStats.lastResetTime > 10000) { // Log every 10 seconds
+    if (cfg.debugLogging || (window.api && window.api.getSettings)) {
+      console.log('[search:perf]', {
+        avgSearchTime: Math.round(searchStats.avgSearchTime * 100) / 100,
+        cacheHitRate: Math.round((cacheHits / (cacheHits + cacheMisses)) * 100),
+        cacheSize: fuzzyMatchCache.size,
+        totalSearches: searchStats.totalSearches
+      });
+    }
+    searchStats.lastResetTime = now;
+  }
 }
 function renderWithHighlights(text = '', posSet = new Set()) {
   if (!posSet || !posSet.size) return escapeHTML(text);
@@ -513,9 +582,49 @@ function openTextPrompt({ title = 'Input', description = '', placeholder = '', v
 
 /* Tab overflow UX no longer needed with sidebar design */
 
-/* ---------- Rendering list ---------- */
+/* ---------- Virtual Scrolling Configuration ---------- */
+const VIRTUAL_CONFIG = {
+  enabled: false, // Disabled for now to preserve grid layout
+  itemHeight: 120, // Approximate height of each item in pixels
+  bufferSize: 5,   // Extra items to render above/below viewport
+  containerHeight: 400, // Approximate container height
+  threshold: 200   // Only enable with very large datasets
+};
+
+let virtualState = {
+  scrollTop: 0,
+  startIndex: 0,
+  endIndex: 0,
+  totalHeight: 0
+};
+
+/* ---------- Optimized Virtual Rendering ---------- */
 function render(list = []) {
+  const renderStart = performance.now();
+  
+  // Use virtualization for large datasets
+  if (VIRTUAL_CONFIG.enabled && list.length > VIRTUAL_CONFIG.threshold) {
+    renderVirtualized(list);
+  } else {
+    renderDirect(list);
+  }
+  
+  setSelected(Math.min(selectedIndex, Math.max(0, list.length - 1)));
+  setupHeaderEditing();
+  
+  const renderTime = performance.now() - renderStart;
+  if (renderTime > 10) { // Log slow renders
+    console.log(`[render:perf] ${Math.round(renderTime)}ms for ${list.length} items`);
+  }
+}
+
+function renderDirect(list) {
   resultsEl.innerHTML = '';
+  
+  // Reset any virtual scrolling styles that might interfere with CSS Grid
+  resultsEl.style.height = '';
+  resultsEl.style.position = '';
+  
   const qobj = parseQuery((searchEl?.value || '').trim());
   const textNeedle = qobj.text.join(' ');
 
@@ -650,11 +759,173 @@ function render(list = []) {
 
     resultsEl.appendChild(li);
   });
+}
 
-  setSelected(Math.min(selectedIndex, Math.max(0, list.length - 1)));
+function renderVirtualized(list) {
+  const container = resultsEl.parentElement; // Scroll container
+  const qobj = parseQuery((searchEl?.value || '').trim());
+  const textNeedle = qobj.text.join(' ');
   
-  // Add event listeners for editable headers
-  setupHeaderEditing();
+  // Calculate visible range
+  const scrollTop = container.scrollTop || 0;
+  const containerHeight = container.clientHeight || VIRTUAL_CONFIG.containerHeight;
+  const itemHeight = VIRTUAL_CONFIG.itemHeight;
+  
+  const startIndex = Math.max(0, Math.floor(scrollTop / itemHeight) - VIRTUAL_CONFIG.bufferSize);
+  const endIndex = Math.min(list.length - 1, Math.ceil((scrollTop + containerHeight) / itemHeight) + VIRTUAL_CONFIG.bufferSize);
+  
+  virtualState = {
+    scrollTop,
+    startIndex,
+    endIndex,
+    totalHeight: list.length * itemHeight
+  };
+  
+  // Create virtual container
+  resultsEl.innerHTML = '';
+  resultsEl.style.height = `${virtualState.totalHeight}px`;
+  resultsEl.style.position = 'relative';
+  
+  // Render only visible items
+  for (let i = startIndex; i <= endIndex; i++) {
+    const it = list[i];
+    if (!it) continue;
+    
+    const li = createListItem(it, qobj, textNeedle);
+    li.style.position = 'absolute';
+    li.style.top = `${i * itemHeight}px`;
+    li.style.width = '100%';
+    li.style.height = `${itemHeight}px`;
+    li.dataset.virtualIndex = i;
+    
+    resultsEl.appendChild(li);
+  }
+  
+  // Add scroll listener for virtual scrolling
+  if (!container.hasVirtualScrollListener) {
+    container.addEventListener('scroll', () => {
+      if (VIRTUAL_CONFIG.enabled && filtered.length > VIRTUAL_CONFIG.threshold) {
+        requestAnimationFrame(() => renderVirtualized(filtered));
+      }
+    });
+    container.hasVirtualScrollListener = true;
+  }
+}
+
+function createListItem(it, qobj, textNeedle) {
+  const li = document.createElement('li');
+  li.className = 'row' + (it.type === 'image' ? ' image' : '');
+  li.dataset.id = it.id;
+  
+  // Ensure no positioning styles interfere with CSS Grid
+  li.style.position = '';
+  li.style.top = '';
+  li.style.width = '';
+  li.style.height = '';
+
+  if (it.type === 'image') {
+    const dims = it.wh ? ` (${it.wh.w}×${it.wh.h})` : '';
+    const ctx = it.source ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}` : '';
+    const ocrFull = (it.ocrText || '').trim();
+    const ocrPreview = ocrFull ? ocrFull.slice(0, 120) : '';
+    const pos = textNeedle && ocrPreview ? fuzzyMatch(ocrPreview, textNeedle).pos : new Set();
+    const ocrHTML = ocrPreview
+      ? `<div class="ocr-preview">${renderWithHighlights(ocrPreview, pos)}${ocrFull.length>120?'…':''}</div>`
+      : '';
+
+    li.innerHTML = `
+      <div class="card-header">
+        <h3 class="card-title" contenteditable="true" data-id="${it.id}">${escapeHTML(it.header || 'Untitled')}</h3>
+        <button class="edit-header-btn" data-id="${it.id}" title="Edit header">✏️</button>
+      </div>
+      <div class="card-metadata">
+        ${new Date(it.ts || Date.now()).toLocaleString()}
+        ${it.source || it.wh ? `<button class="info-btn" data-id="${it.id}" title="Show details">ℹ️</button>` : ''}
+      </div>
+      <div class="card-content">
+        <div class="thumbwrap">
+          <img class="thumb" src="${it.thumb}" alt="Clipboard image" />
+        </div>
+      </div>
+      <div class="tags"></div>
+      <div class="card-actions">
+        <div class="card-actions-left">
+          ${iconBtn('pin-btn', 'star', it.pinned ? 'Unpin' : 'Pin', it.pinned, it.id)}
+          ${iconBtn('stack-btn', 'stack', inPasteStack(it.id) ? 'Remove from Paste Stack' : 'Add to Paste Stack', inPasteStack(it.id), it.id)}
+        </div>
+        <div class="card-actions-right">
+          ${iconBtn('shortcut-btn', 'keyboard', it.shortcut ? 'Edit text shortcut' : 'Create text shortcut', !!it.shortcut, it.id)}
+          ${iconBtn('col-btn', 'folder', 'Add/remove in collections', false, it.id)}
+          ${iconBtn('del-btn', 'trash', 'Delete', false, it.id)}
+        </div>
+      </div>
+    `;
+  } else {
+    const ctx = it.source ? ` • ${it.source.app ?? ''}${it.source.title ? ' - ' + it.source.title : ''}` : '';
+    const rawPrimary = trimOneLine(it.text || '');
+    const pos = textNeedle ? fuzzyMatch(rawPrimary, textNeedle).pos : new Set();
+    const primaryHTML = renderWithHighlights(rawPrimary, pos);
+    const qaHTML = buildQuickActionsHTML(it);
+
+    li.innerHTML = `
+      <div class="card-header">
+        <h3 class="card-title" contenteditable="true" data-id="${it.id}">${escapeHTML(it.header || 'Untitled')}</h3>
+        <button class="edit-header-btn" data-id="${it.id}" title="Edit header">✏️</button>
+      </div>
+      <div class="card-metadata">
+        ${new Date(it.ts || Date.now()).toLocaleString()}
+        ${it.source ? `<button class="info-btn" data-id="${it.id}" title="Show details">ℹ️</button>` : ''}
+      </div>
+      <div class="card-content">
+        <div class="primary">${primaryHTML}</div>
+        ${rawPrimary.length > 100 ? `<button class="expand-btn" data-id="${it.id}" title="View full text">...</button>` : ''}
+      </div>
+      <div class="tags"></div>
+      <div class="card-actions">
+        <div class="card-actions-left">
+          ${iconBtn('pin-btn', 'star', it.pinned ? 'Unpin' : 'Pin', it.pinned, it.id)}
+          ${isUrlItem(it) ? iconBtn('open-btn', 'external', 'Open in browser', false, it.id) : ''}
+          ${qaHTML}
+          ${iconBtn('stack-btn', 'stack', inPasteStack(it.id) ? 'Remove from Paste Stack' : 'Add to Paste Stack', inPasteStack(it.id), it.id)}
+        </div>
+        <div class="card-actions-right">
+          ${iconBtn('shortcut-btn', 'keyboard', it.shortcut ? 'Edit text shortcut' : 'Create text shortcut', !!it.shortcut, it.id)}
+          ${iconBtn('col-btn', 'folder', 'Add/remove in collections', false, it.id)}
+          ${iconBtn('del-btn', 'trash', 'Delete', false, it.id)}
+        </div>
+      </div>
+    `;
+  }
+
+  // Tags UI
+  const wrap = li.querySelector('.tags');
+  const tagList = uniq(it.tags || []);
+  if (wrap) {
+    // Add shortcut badge first if exists
+    if (it.shortcut) {
+      const shortcutBadge = document.createElement('span');
+      shortcutBadge.className = 'shortcut-badge';
+      shortcutBadge.textContent = `⌨ ${it.shortcut}`;
+      shortcutBadge.title = `Text shortcut: ${it.shortcut} (click to filter)`;
+      shortcutBadge.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const cur = searchEl.value.trim();
+        searchEl.value = (cur ? cur + ' ' : '') + `shortcut:${it.shortcut}`;
+        applyFilter();
+      });
+      wrap.appendChild(shortcutBadge);
+    }
+    
+    tagList.forEach(t => wrap.appendChild(tagPill(t, { removable: true, onRemove: () => removeTagForItem(it, t) })));
+    const addBtn = document.createElement('button');
+    addBtn.className = 'tag-add';
+    addBtn.textContent = '+ Tag';
+    addBtn.title = 'Add tag';
+    addBtn.addEventListener('click', (e) => { e.stopPropagation(); addTagsForItem(it); });
+    wrap.appendChild(addBtn);
+  }
+
+  return li;
 }
 
 function setupHeaderEditing() {
@@ -843,62 +1114,100 @@ function rebuildTabs() {
   });
 }
 
-/* ---------- Filter + Search ---------- */
-function applyFilter() {
-  // Collections hub view
-  if (currentTab === 'collections') {
-    rebuildTabs();
-    renderCollectionsHub();
-    return;
+/* ---------- Optimized Filter + Search ---------- */
+let searchDebounceTimer = null;
+const SEARCH_DEBOUNCE_MS = 150;
+
+function applyFilter(immediate = false) {
+  // Debounce search to avoid excessive filtering
+  if (!immediate && searchDebounceTimer) {
+    clearTimeout(searchDebounceTimer);
   }
+  
+  const executeFilter = () => {
+    const searchStart = performance.now();
+    
+    // Collections hub view
+    if (currentTab === 'collections') {
+      rebuildTabs();
+      renderCollectionsHub();
+      return;
+    }
 
-  const q = (searchEl?.value || '').trim();
-  const qobj = parseQuery(q);
+    const q = (searchEl?.value || '').trim();
+    const qobj = parseQuery(q);
 
-  let scope = items.slice();
+    let scope = items.slice();
 
-  // Default tabs
-  if (currentTab === 'images') scope = scope.filter(i => i.type === 'image');
-  if (currentTab === 'urls')   scope = scope.filter(i => i.type !== 'image' && isUrlItem(i));
-  if (currentTab === 'pinned') scope = scope.filter(i => !!i.pinned);
+    // Pre-filter by tab type (fast operations first)
+    if (currentTab === 'images') {
+      scope = scope.filter(i => i.type === 'image');
+    } else if (currentTab === 'urls') {
+      scope = scope.filter(i => i.type !== 'image' && isUrlItem(i));
+    } else if (currentTab === 'pinned') {
+      scope = scope.filter(i => !!i.pinned);
+    } else if (currentTab.startsWith('col:')) {
+      // Collection tab: data-tab="col:<id>"
+      const colId = currentTab.slice(4);
+      const col = (collections || []).find(c => c.id === colId);
+      const colSet = new Set(col?.itemIds || []);
+      scope = scope.filter(i => colSet.has(i.id));
+    }
 
-  // Collection tab: data-tab="col:<id>"
-  if (currentTab.startsWith('col:')) {
-    const colId = currentTab.slice(4);
-    const col = (collections || []).find(c => c.id === colId);
-    const colSet = new Set(col?.itemIds || []);
-    scope = scope.filter(i => colSet.has(i.id));
-  }
+    // Advanced filters (type/has/pinned/tag)
+    scope = scope.filter(it => itemPassesFilters(it, qobj));
 
-  // Advanced filters (type/has/pinned/tag)
-  scope = scope.filter(it => itemPassesFilters(it, qobj));
-
-  // Text search
-  if (qobj.text.length) {
-    const mode = (searchModeEl?.value || cfg.searchMode || 'fuzzy');
-    if (mode === 'fuzzy') {
-      const thresh = Number(fuzzyThreshEl?.value || cfg.fuzzyThreshold || 0.4);
+    // Text search with performance optimization
+    if (qobj.text.length) {
+      const mode = (searchModeEl?.value || cfg.searchMode || 'fuzzy');
       const needle = qobj.text.join(' ');
-      const matches = [];
-      for (const it of scope) {
-        const s = fuzzyMatch(baseSearchTextForItem(it), needle).score;
-        if (s >= thresh) matches.push({ ...it, _score: s });
+      
+      if (mode === 'fuzzy') {
+        const thresh = Number(fuzzyThreshEl?.value || cfg.fuzzyThreshold || 0.4);
+        const matches = [];
+        
+        // Process items in batches to avoid blocking UI
+        for (const it of scope) {
+          const searchText = baseSearchTextForItem(it);
+          const result = fuzzyMatch(searchText, needle);
+          if (result.score >= thresh) {
+            matches.push({ ...it, _score: result.score });
+          }
+        }
+        
+        sortByScoreThenDefault(matches);
+        filtered = matches;
+      } else {
+        // Exact search (faster)
+        const needleLower = needle.toLowerCase();
+        filtered = scope.filter(it => {
+          const searchText = String(baseSearchTextForItem(it)).toLowerCase();
+          return searchText.includes(needleLower);
+        });
+        sortCombined(filtered);
       }
-      sortByScoreThenDefault(matches);
-      filtered = matches;
     } else {
-      const needle = qobj.text.join(' ').toLowerCase();
-      filtered = scope.filter(it => String(baseSearchTextForItem(it)).toLowerCase().includes(needle));
+      filtered = scope;
       sortCombined(filtered);
     }
-  } else {
-    filtered = scope;
-    sortCombined(filtered);
-  }
 
-  selectedIndex = 0;
-  rebuildTabs();
-  render(filtered);
+    selectedIndex = 0;
+    rebuildTabs();
+    render(filtered);
+    
+    // Update search performance stats
+    const searchTime = performance.now() - searchStart;
+    updateSearchStats(searchTime);
+  };
+  
+  if (immediate) {
+    executeFilter();
+  } else {
+    if (searchDebounceTimer) {
+      clearManagedTimeout(searchDebounceTimer);
+    }
+    searchDebounceTimer = createManagedTimeout(executeFilter, SEARCH_DEBOUNCE_MS);
+  }
 }
 
 /* ---------- Selection & actions ---------- */
@@ -963,19 +1272,95 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
-/* Search input */
-searchEl?.addEventListener('input', () => applyFilter());
+/* Memory management for event listeners */
+const eventListeners = new WeakMap();
+const activeTimers = new Set();
+
+function addManagedEventListener(element, event, handler, options = {}) {
+  if (!element) return;
+  
+  const wrappedHandler = (...args) => {
+    try {
+      return handler(...args);
+    } catch (error) {
+      console.error('[event:error]', { event, error: error.message });
+    }
+  };
+  
+  element.addEventListener(event, wrappedHandler, options);
+  
+  if (!eventListeners.has(element)) {
+    eventListeners.set(element, []);
+  }
+  eventListeners.get(element).push({ event, handler: wrappedHandler, options });
+}
+
+function removeManagedEventListener(element) {
+  if (!element || !eventListeners.has(element)) return;
+  
+  const listeners = eventListeners.get(element);
+  listeners.forEach(({ event, handler, options }) => {
+    element.removeEventListener(event, handler, options);
+  });
+  eventListeners.delete(element);
+}
+
+function createManagedTimeout(callback, delay) {
+  const timeoutId = setTimeout(() => {
+    activeTimers.delete(timeoutId);
+    callback();
+  }, delay);
+  activeTimers.add(timeoutId);
+  return timeoutId;
+}
+
+function clearManagedTimeout(timeoutId) {
+  if (timeoutId && activeTimers.has(timeoutId)) {
+    clearTimeout(timeoutId);
+    activeTimers.delete(timeoutId);
+  }
+}
+
+// Cleanup all managed resources
+function cleanupManagedResources() {
+  // Clear all timers
+  activeTimers.forEach(timerId => {
+    try {
+      clearTimeout(timerId);
+    } catch (e) {
+      // Ignore errors during cleanup
+    }
+  });
+  activeTimers.clear();
+  
+  // Clear search cache periodically to prevent memory growth
+  if (fuzzyMatchCache.size > MAX_CACHE_SIZE * 0.5) {
+    fuzzyMatchCache.clear();
+    cacheHits = 0;
+    cacheMisses = 0;
+  }
+}
+
+// Run cleanup periodically
+setInterval(cleanupManagedResources, 60000); // Every minute
+
+/* Search input with debouncing */
+if (searchEl) {
+  addManagedEventListener(searchEl, 'input', () => applyFilter());
+}
 
 /* Sidebar tabs click */
-tabsEl?.addEventListener('click', (e) => {
-  const btn = e.target.closest('.sidebar-tab');
-  if (!btn) return;
-  currentTab = btn.dataset.tab || 'recent';
-  localStorage.setItem('clip_tab', currentTab);
-  rebuildTabs();
-  applyFilter();
-  if (!cfg.autoPasteOnSelect) { searchEl?.focus(); searchEl?.select(); }
-});
+if (tabsEl) {
+  addManagedEventListener(tabsEl, 'click', (e) => {
+    const btn = e.target.closest('.sidebar-tab');
+    if (!btn) return;
+    currentTab = btn.dataset.tab || 'recent';
+    localStorage.setItem('clip_tab', currentTab);
+    rebuildTabs();
+    applyFilter();
+    if (!cfg.autoPasteOnSelect) { searchEl?.focus(); searchEl?.select(); }
+  });
+}
 
 /* Row click delegation */
 resultsEl?.addEventListener('click', async (e) => {
@@ -1495,59 +1880,121 @@ function applyTheme(theme) {
 }
 themeEl?.addEventListener('change', () => applyTheme(themeEl.value));
 
-/* ---------- Boot ---------- */
+/* ---------- Optimized Boot Process ---------- */
 async function boot() {
-  // Restore stack from session (optional)
+  const bootStart = performance.now();
+  console.log('[boot] Starting renderer initialization');
+  
+  // Phase 1: Essential UI state (synchronous)
   try {
-    const saved = JSON.parse(sessionStorage.getItem('pasteStack') || '[]');
-    pasteStack = saved.filter((x) => typeof x === 'number');
-    pasteStackIds = new Set(pasteStack);
-  } catch {}
-  updateStackChip();
-
-  items = await window.api.getHistory().catch(() => []);
-  try {
-    const s = await window.api.getSettings();
-    cfg = { ...cfg, ...s };
-
-    if (themeEl) themeEl.value = cfg.theme;
-    applyTheme(cfg.theme);
-
-    if (hotkeyEl) {
-      hotkeyEl.dataset.accelValue = cfg.hotkey;
-      hotkeyEl.value = displayLabel(cfg.hotkey);
-    }
-    if (maxItemsEl) maxItemsEl.value = cfg.maxItems;
-    if (captureEl)  captureEl.checked = !!cfg.captureContext;
-    if (searchModeEl)  searchModeEl.value  = cfg.searchMode;
-    if (fuzzyThreshEl) fuzzyThreshEl.value = String(cfg.fuzzyThreshold);
-    if (autoPasteEl)   autoPasteEl.checked = !!cfg.autoPasteOnSelect;
-    // overlaySize UI removed
+    // Apply cached theme immediately to avoid flash
+    const cachedTheme = localStorage.getItem('clip_theme') || 'dark';
+    applyTheme(cachedTheme);
     
-    // Text shortcuts settings
-    if (enableTextShortcutsEl) enableTextShortcutsEl.checked = !!cfg.enableTextShortcuts;
-    if (shortcutTriggerPrefixEl) shortcutTriggerPrefixEl.value = cfg.shortcutTriggerPrefix || '//';
-    if (shortcutCaseSensitiveEl) shortcutCaseSensitiveEl.checked = !!cfg.shortcutCaseSensitive;
-    if (shortcutMinLengthEl) shortcutMinLengthEl.value = String(cfg.shortcutMinLength || 2);
-    if (showShortcutNotificationsEl) showShortcutNotificationsEl.checked = !!cfg.showShortcutNotifications;
+    // Restore stack from session (fast synchronous operation)
+    try {
+      const saved = JSON.parse(sessionStorage.getItem('pasteStack') || '[]');
+      pasteStack = saved.filter((x) => typeof x === 'number');
+      pasteStackIds = new Set(pasteStack);
+    } catch {}
+    updateStackChip();
     
-    // Smart Paste settings
-    if (enableSmartPasteEl) enableSmartPasteEl.checked = !!cfg.enableSmartPaste;
-    if (smartPasteHotkeyEl) {
-      smartPasteHotkeyEl.dataset.accelValue = cfg.smartPasteHotkey || 'F12';
-      smartPasteHotkeyEl.value = displayLabel(cfg.smartPasteHotkey || 'F12');
-    }
+    console.log('[boot] Phase 1 complete:', Math.round(performance.now() - bootStart), 'ms');
   } catch (e) {
-    console.warn('[renderer] getSettings failed:', e?.message);
+    console.error('[boot] Phase 1 error:', e);
   }
 
-  // Load collections
-  try { collections = await window.api.collections.list(); } catch {}
+  // Phase 2: Load data in parallel (asynchronous)
+  const dataPromises = [
+    window.api.getHistory().catch(() => []),
+    window.api.getSettings().catch(() => ({})),
+    window.api.collections.list().catch(() => [])
+  ];
+  
+  try {
+    const [historyData, settingsData, collectionsData] = await Promise.all(dataPromises);
+    
+    // Update state
+    items = historyData;
+    collections = collectionsData;
+    cfg = { ...cfg, ...settingsData };
+    
+    // Cache theme for next boot
+    localStorage.setItem('clip_theme', cfg.theme);
+    
+    console.log('[boot] Data loaded:', {
+      items: items.length,
+      collections: collections.length,
+      time: Math.round(performance.now() - bootStart) + 'ms'
+    });
+  } catch (e) {
+    console.error('[boot] Data loading error:', e);
+    // Use fallback empty state
+    items = [];
+    collections = [];
+  }
 
-  filtered = items.slice();
-  rebuildTabs();
-  render(filtered);
-  setSelected(0);
+  // Phase 3: Update UI elements (batched to avoid layout thrashing)
+  try {
+    const uiUpdates = () => {
+      // Theme
+      if (themeEl) themeEl.value = cfg.theme;
+      applyTheme(cfg.theme);
+
+      // Hotkey display
+      if (hotkeyEl) {
+        hotkeyEl.dataset.accelValue = cfg.hotkey;
+        hotkeyEl.value = displayLabel(cfg.hotkey);
+      }
+      
+      // Settings form elements
+      if (maxItemsEl) maxItemsEl.value = cfg.maxItems;
+      if (captureEl) captureEl.checked = !!cfg.captureContext;
+      if (searchModeEl) searchModeEl.value = cfg.searchMode;
+      if (fuzzyThreshEl) fuzzyThreshEl.value = String(cfg.fuzzyThreshold);
+      if (autoPasteEl) autoPasteEl.checked = !!cfg.autoPasteOnSelect;
+      
+      // Text shortcuts settings
+      if (enableTextShortcutsEl) enableTextShortcutsEl.checked = !!cfg.enableTextShortcuts;
+      if (shortcutTriggerPrefixEl) shortcutTriggerPrefixEl.value = cfg.shortcutTriggerPrefix || '//';
+      if (shortcutCaseSensitiveEl) shortcutCaseSensitiveEl.checked = !!cfg.shortcutCaseSensitive;
+      if (shortcutMinLengthEl) shortcutMinLengthEl.value = String(cfg.shortcutMinLength || 2);
+      if (showShortcutNotificationsEl) showShortcutNotificationsEl.checked = !!cfg.showShortcutNotifications;
+      
+      // Smart Paste settings
+      if (enableSmartPasteEl) enableSmartPasteEl.checked = !!cfg.enableSmartPaste;
+      if (smartPasteHotkeyEl) {
+        smartPasteHotkeyEl.dataset.accelValue = cfg.smartPasteHotkey || 'F12';
+        smartPasteHotkeyEl.value = displayLabel(cfg.smartPasteHotkey || 'F12');
+      }
+    };
+    
+    // Batch UI updates to avoid multiple reflows
+    requestAnimationFrame(uiUpdates);
+    
+    console.log('[boot] UI updated:', Math.round(performance.now() - bootStart), 'ms');
+  } catch (e) {
+    console.error('[boot] UI update error:', e);
+  }
+
+  // Phase 4: Render initial view (can be deferred)
+  requestAnimationFrame(() => {
+    try {
+      filtered = items.slice();
+      rebuildTabs();
+      render(filtered);
+      setSelected(0);
+      
+      const totalTime = Math.round(performance.now() - bootStart);
+      console.log('[boot] Complete:', totalTime, 'ms', {
+        items: items.length,
+        collections: collections.length,
+        virtualEnabled: VIRTUAL_CONFIG.enabled && items.length > VIRTUAL_CONFIG.threshold
+      });
+    } catch (e) {
+      console.error('[boot] Render error:', e);
+    }
+  });
 }
 
 window.addEventListener('DOMContentLoaded', async () => {
@@ -1616,6 +2063,55 @@ stackChipEl?.addEventListener('contextmenu', (e) => {
   window.api.onOverlayAnim((visible) => overlayCard?.classList.toggle('show', !!visible));
 });
 
+/* ---------- Performance monitoring functions ---------- */
+async function updatePerformanceMonitor() {
+  if (!perfMonitorEl) return;
+  
+  try {
+    const stats = await window.api.perf.getStats();
+    
+    const formatBytes = (bytes) => {
+      const mb = bytes / 1024 / 1024;
+      return mb < 1 ? `${Math.round(mb * 1024)}KB` : `${Math.round(mb)}MB`;
+    };
+    
+    const html = `
+      <div><strong>Clipboard Polling</strong></div>
+      <div>• Rate: ${stats.clipboard.pollsPerSecond}/sec (${stats.clipboard.adaptiveInterval}ms interval)</div>
+      <div>• Avg poll time: ${stats.clipboard.avgPollTime}ms</div>
+      <div>• Total polls: ${stats.clipboard.totalPolls}</div>
+      
+      <div style="margin-top: 8px;"><strong>OCR Processing</strong></div>
+      <div>• Processed: ${stats.ocr.totalProcessed} (${stats.ocr.successRate}% success)</div>
+      <div>• Avg time: ${stats.ocr.avgProcessingTime}ms</div>
+      <div>• Queue: ${stats.ocr.queueSize} | Workers: ${stats.ocr.activeWorkers}/${stats.ocr.workerPoolSize}</div>
+      <div>• Errors: ${stats.ocr.errors}</div>
+      
+      <div style="margin-top: 8px;"><strong>Memory Usage</strong></div>
+      <div>• Heap: ${formatBytes(stats.memory.usage.heapUsed)} / ${formatBytes(stats.memory.usage.heapTotal)}</div>
+      <div>• External: ${formatBytes(stats.memory.usage.external)}</div>
+      
+      <div style="margin-top: 8px;"><strong>Smart Headers</strong></div>
+      <div>• Generated: ${stats.headers.totalGenerated} (${stats.headers.textHeaders} text, ${stats.headers.imageHeaders} image)</div>
+      <div>• OCR updates: ${stats.headers.ocrUpdates}</div>
+      <div>• Avg time: ${stats.headers.avgGenerationTime}ms</div>
+      
+      <div style="margin-top: 8px;"><strong>Search Performance</strong></div>
+      <div>• Avg search: ${searchStats.avgSearchTime}ms</div>
+      <div>• Cache: ${fuzzyMatchCache.size} entries (${Math.round((cacheHits / (cacheHits + cacheMisses)) * 100)}% hit rate)</div>
+      
+      <div style="margin-top: 8px;"><strong>App Info</strong></div>
+      <div>• Uptime: ${Math.floor(stats.app.uptime / 60)}m ${stats.app.uptime % 60}s</div>
+      <div>• Version: ${stats.app.version} (${stats.app.platform})</div>
+      <div>• Items: ${items.length} | Collections: ${collections.length}</div>
+    `;
+    
+    perfMonitorEl.innerHTML = html;
+  } catch (error) {
+    perfMonitorEl.innerHTML = `<div style="color: #ef4444;">Error loading stats: ${error.message}</div>`;
+  }
+}
+
 /* ---------- Settings actions ---------- */
 clearBtn?.addEventListener('click', async () => {
   await window.api.clearHistory();
@@ -1624,9 +2120,11 @@ clearBtn?.addEventListener('click', async () => {
 });
 settingsBtn?.addEventListener('click', () => {
   settingsEl?.classList.add('open');
+  updatePerformanceMonitor(); // Load performance stats when opening settings
   settingsEl?.querySelector('input,select,button,textarea')?.focus();
 });
 closeBtn?.addEventListener('click', () => settingsEl?.classList.remove('open'));
+refreshPerfBtn?.addEventListener('click', updatePerformanceMonitor);
 
 saveBtn?.addEventListener('click', async () => {
   const payload = {

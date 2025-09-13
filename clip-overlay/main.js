@@ -366,6 +366,19 @@ function registerHotkey() {
 let clipboardPollTimer = null;
 let lastClipboardText = '';
 let lastImageHash = '';
+let clipboardCheckCount = 0;
+let adaptiveInterval = 200; // Start with 200ms, can adapt
+const MIN_INTERVAL = 100;
+const MAX_INTERVAL = 1000;
+const IDLE_THRESHOLD = 50; // After 50 unchanged checks, slow down
+
+// Performance monitoring
+let perfStats = {
+  pollsPerSecond: 0,
+  avgPollTime: 0,
+  totalPolls: 0,
+  lastResetTime: Date.now()
+};
 
 async function getOcrWorker() {
   if (ocrWorker) return ocrWorker;
@@ -379,6 +392,246 @@ async function getOcrWorker() {
     workerBlobURL: false,
   });
   return ocrWorker;
+}
+
+// Enhanced OCR processing with worker pool and smart queue management
+let ocrWorkerPool = [];
+let ocrQueue = [];
+let isProcessingOcr = false;
+let ocrStats = {
+  totalProcessed: 0,
+  avgProcessingTime: 0,
+  successRate: 0,
+  errors: 0
+};
+
+const OCR_CONFIG = {
+  maxWorkers: 2,           // Maximum number of worker instances
+  queueLimit: 10,          // Maximum queue size
+  workerTimeout: 30000,    // Worker timeout in ms
+  retryAttempts: 2,        // Retry failed OCR operations
+  cleanupInterval: 300000  // Cleanup interval (5 minutes)
+};
+
+async function createOcrWorker() {
+  const found = resolveEngData();
+  if (!found) throw new Error('ENG model not found');
+  
+  dlog('ocr:worker:create', found);
+  const worker = await createWorker('eng', undefined, {
+    langPath: found.dir,
+    gzip: found.gzip,
+    cachePath: path.join(app.getPath('userData'), 'tess-cache'),
+    workerBlobURL: false,
+  });
+  
+  return {
+    worker,
+    busy: false,
+    created: Date.now(),
+    lastUsed: Date.now(),
+    tasksCompleted: 0
+  };
+}
+
+async function getOcrWorkerFromPool() {
+  // Find available worker
+  let workerInstance = ocrWorkerPool.find(w => !w.busy);
+  
+  if (!workerInstance && ocrWorkerPool.length < OCR_CONFIG.maxWorkers) {
+    // Create new worker if pool not full
+    try {
+      workerInstance = await createOcrWorker();
+      ocrWorkerPool.push(workerInstance);
+      dlog('ocr:pool:add', { poolSize: ocrWorkerPool.length });
+    } catch (e) {
+      dlog('ocr:worker:create:error', { msg: e?.message });
+      return null;
+    }
+  }
+  
+  if (!workerInstance) {
+    // No available workers, wait for one
+    return null;
+  }
+  
+  workerInstance.busy = true;
+  workerInstance.lastUsed = Date.now();
+  return workerInstance;
+}
+
+function releaseOcrWorker(workerInstance) {
+  workerInstance.busy = false;
+  workerInstance.tasksCompleted++;
+  workerInstance.lastUsed = Date.now();
+}
+
+async function processOcrQueue() {
+  if (isProcessingOcr) return;
+  isProcessingOcr = true;
+  
+  const processTask = async (task) => {
+    const startTime = Date.now();
+    let attempts = 0;
+    
+    while (attempts <= OCR_CONFIG.retryAttempts) {
+      const workerInstance = await getOcrWorkerFromPool();
+      if (!workerInstance) {
+        // No workers available, requeue for later
+        setTimeout(() => processOcrQueue(), 1000);
+        return;
+      }
+      
+      try {
+        const buf = await fsp.readFile(task.filePath);
+        const timeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('OCR timeout')), OCR_CONFIG.workerTimeout)
+        );
+        
+        const recognizePromise = workerInstance.worker.recognize(buf);
+        const { data } = await Promise.race([recognizePromise, timeoutPromise]);
+        const text = (data?.text || '').trim();
+        
+        if (text) {
+          const itemsNow = historyStore.get('items') || [];
+          const idx = itemsNow.findIndex(i => i.id === task.id);
+          if (idx >= 0) {
+            const addTags = autoTagsForText(text);
+            const existing = Array.from(new Set(itemsNow[idx].tags || []));
+            itemsNow[idx].ocrText = text.length > 12000 ? text.slice(0, 12000) : text;
+            itemsNow[idx].tags = Array.from(new Set([...existing, ...addTags, 'ocr']));
+            
+            // Update header with OCR-enhanced analysis (only if still default/generic)
+            const currentHeader = itemsNow[idx].header || 'Untitled';
+            const isGenericHeader = currentHeader === 'Untitled' || 
+                                  currentHeader === 'Image' || 
+                                  currentHeader === 'Screenshot' ||
+                                  currentHeader.endsWith(' Screenshot');
+            
+            if (isGenericHeader) {
+              const enhancedHeader = generateImageHeader(text, itemsNow[idx].source, itemsNow[idx].wh);
+              if (enhancedHeader && enhancedHeader !== currentHeader) {
+                itemsNow[idx].header = truncateHeader(enhancedHeader);
+                headerStats.ocrUpdates++;
+                dlog('header:ocr:update', { 
+                  id: task.id, 
+                  old: currentHeader, 
+                  new: itemsNow[idx].header 
+                });
+              }
+            }
+            
+            historyStore.set('items', itemsNow);
+            overlayWin?.webContents?.send('history:update', itemsNow);
+            
+            const processingTime = Date.now() - startTime;
+            ocrStats.totalProcessed++;
+            ocrStats.avgProcessingTime = (ocrStats.avgProcessingTime + processingTime) / 2;
+            ocrStats.successRate = (ocrStats.totalProcessed / (ocrStats.totalProcessed + ocrStats.errors)) * 100;
+            
+            dlog('ocr:done', { 
+              id: task.id, 
+              tags: addTags, 
+              processingTime,
+              attempts: attempts + 1,
+              headerUpdated: isGenericHeader
+            });
+          }
+        }
+        
+        releaseOcrWorker(workerInstance);
+        return; // Success, exit retry loop
+        
+      } catch (e) {
+        releaseOcrWorker(workerInstance);
+        attempts++;
+        ocrStats.errors++;
+        
+        if (attempts > OCR_CONFIG.retryAttempts) {
+          dlog('ocr:error:final', { 
+            msg: e?.message, 
+            id: task.id, 
+            attempts 
+          });
+        } else {
+          dlog('ocr:error:retry', { 
+            msg: e?.message, 
+            id: task.id, 
+            attempt: attempts 
+          });
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempts)); // Exponential backoff
+        }
+      }
+    }
+  };
+  
+  // Process queue with concurrency control
+  const concurrentTasks = [];
+  while (ocrQueue.length > 0 && concurrentTasks.length < OCR_CONFIG.maxWorkers) {
+    const task = ocrQueue.shift();
+    concurrentTasks.push(processTask(task));
+  }
+  
+  if (concurrentTasks.length > 0) {
+    await Promise.allSettled(concurrentTasks);
+  }
+  
+  isProcessingOcr = false;
+  
+  // Continue processing if queue not empty
+  if (ocrQueue.length > 0) {
+    setTimeout(() => processOcrQueue(), 100);
+  }
+}
+
+// Cleanup idle workers periodically
+setInterval(() => {
+  const now = Date.now();
+  ocrWorkerPool = ocrWorkerPool.filter(workerInstance => {
+    if (!workerInstance.busy && (now - workerInstance.lastUsed) > OCR_CONFIG.cleanupInterval) {
+      try {
+        workerInstance.worker.terminate();
+        dlog('ocr:worker:cleanup', { 
+          age: now - workerInstance.created,
+          tasksCompleted: workerInstance.tasksCompleted 
+        });
+      } catch (e) {
+        dlog('ocr:worker:cleanup:error', { msg: e?.message });
+      }
+      return false; // Remove from pool
+    }
+    return true; // Keep in pool
+  });
+}, OCR_CONFIG.cleanupInterval);
+
+// Graceful shutdown
+process.on('exit', () => {
+  ocrWorkerPool.forEach(workerInstance => {
+    try {
+      workerInstance.worker.terminate();
+    } catch (e) {
+      // Ignore errors during shutdown
+    }
+  });
+});
+
+function updatePerfStats() {
+  const now = Date.now();
+  const elapsed = now - perfStats.lastResetTime;
+  
+  if (elapsed >= 5000) { // Reset every 5 seconds
+    perfStats.pollsPerSecond = (perfStats.totalPolls * 1000) / elapsed;
+    perfStats.lastResetTime = now;
+    perfStats.totalPolls = 0;
+    
+    if (settingsStore?.get('debugLogging')) {
+      dlog('perf:clipboard', {
+        pollsPerSecond: Math.round(perfStats.pollsPerSecond * 100) / 100,
+        adaptiveInterval,
+        avgPollTime: Math.round(perfStats.avgPollTime * 100) / 100
+      });
+    }
+  }
 }
 const RX = {
   url: /\b((https?:\/\/|www\.)[^\s/$.?#].[^\s]*)/i,
@@ -406,78 +659,713 @@ function autoTagsForText(text) {
   return Array.from(new Set(tags));
 }
 
+/* ---------- Smart Header Generation System ---------- */
+const HEADER_PATTERNS = {
+  // URLs - extract meaningful domain/page info
+  url: /^https?:\/\/(?:www\.)?([^\/\s]+)/i,
+  
+  // Communication
+  email: /\b([A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,})/i,
+  phone: /(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})/,
+  
+  // Dates and Times
+  meetingTime: /\b(?:meeting|call|conference|sync|standup|scrum).{0,50}?\b(?:at\s+)?(\d{1,2}(?::\d{2})?(?:\s*(?:am|pm))?)/i,
+  dateTime: /\b(\d{1,2}\/\d{1,2}\/\d{2,4}|\d{1,2}-\d{1,2}-\d{2,4}|\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?)/i,
+  time: /\b(\d{1,2}:\d{2}(?:\s*(?:am|pm))?|\d{1,2}\s*(?:am|pm))\b/i,
+  
+  // Addresses and Locations
+  address: /\b\d+\s+[A-Za-z0-9\s]+(?:street|st|avenue|ave|road|rd|boulevard|blvd|lane|ln|drive|dr|court|ct|place|pl|way)\b/i,
+  
+  // Code patterns
+  codeFunction: /(?:function|def|const|let|var|class|interface|type)\s+([A-Za-z_][A-Za-z0-9_]*)/,
+  codeLang: {
+    javascript: /\b(?:function|const|let|var|=>|console\.log|require|import|export)\b/,
+    python: /\b(?:def|import|from|print|if __name__|class|lambda)\b/,
+    css: /\{[^}]*(?:color|background|margin|padding|font|border)[^}]*\}/,
+    html: /<\/?[a-z][\s\S]*?>/i,
+    sql: /\b(?:select|insert|update|delete|create|drop|alter|from|where|join)\b/i,
+    json: /^\s*[\{\[][\s\S]*[\}\]]\s*$/
+  },
+  
+  // Content types
+  task: /(?:todo|task|checklist|reminder|pick up|call|finish|complete|buy|get|do)/i,
+  note: /(?:note|remember|important|fyi|heads up|reminder)/i,
+  invoice: /\b(?:invoice|bill|receipt|order)\s*#?(\w+)/i,
+  
+  // Common content starters
+  meeting: /\b(?:meeting|call|conference|sync|standup|scrum|demo)\b/i,
+  howTo: /\b(?:how\s+to|tutorial|guide|instructions|steps)/i
+};
+
+function generateSmartHeader(item) {
+  const startTime = performance.now();
+  let header = 'Untitled';
+  
+  try {
+    if (item.type === 'text') {
+      header = generateTextHeader(item.text, item.source);
+      headerStats.textHeaders++;
+    } else if (item.type === 'image') {
+      header = generateImageHeader(item.ocrText, item.source, item.wh);
+      headerStats.imageHeaders++;
+    }
+    
+    headerStats.totalGenerated++;
+    const generationTime = performance.now() - startTime;
+    headerStats.avgGenerationTime = (headerStats.avgGenerationTime + generationTime) / 2;
+    
+    return header;
+  } catch (e) {
+    dlog('header:generation:error', { msg: e?.message, type: item.type });
+    return 'Untitled';
+  }
+}
+
+function generateTextHeader(text, source) {
+  const t = String(text || '').trim();
+  if (!t) return 'Untitled';
+  
+  try {
+    // STEP 1: Context-First Analysis (HIGHEST PRIORITY)
+    const contextHeader = analyzeSourceContext(t, source);
+    if (contextHeader) return contextHeader;
+    
+    // STEP 2: Content Analysis - What is this PRIMARILY about?
+    const contentType = analyzePrimaryContent(t);
+    
+    // STEP 3: Generate header based on primary content type
+    switch (contentType.type) {
+      case 'single_url':
+        return generateUrlHeader(contentType.data);
+        
+      case 'single_email':
+        return generateEmailHeader(contentType.data);
+        
+      case 'single_phone':
+        return 'Phone Number';
+        
+      case 'code':
+        return generateCodeHeader(t, contentType.confidence);
+        
+      case 'meeting':
+        return generateMeetingHeader(t);
+        
+      case 'document':
+        return extractDocumentTitle(t);
+        
+      case 'list':
+        return generateListHeader(t);
+        
+      case 'conversation':
+        return 'Chat Messages';
+        
+      default:
+        // STEP 4: Smart summarization for everything else
+        return extractSmartSummary(t);
+    }
+    
+  } catch (e) {
+    dlog('header:text:error', { msg: e?.message, textLength: t.length });
+    return extractSmartSummary(t) || 'Text Content';
+  }
+}
+
+// Context-first analysis - prioritize window/app info
+function analyzeSourceContext(text, source) {
+  if (!source || !source.app) return null;
+  
+  const app = source.app.toLowerCase();
+  const title = (source.title || '').toLowerCase();
+  const textLen = text.length;
+  
+  // VS Code / IDEs - likely code
+  if (app.includes('code') || app.includes('visual studio') || app.includes('atom') || app.includes('sublime')) {
+    if (looksLikeCode(text)) {
+      const lang = detectCodeLanguage(text) || 'Code';
+      const func = extractMainFunction(text);
+      return func ? `${lang} - ${func}` : `${lang} Snippet`;
+    }
+    return 'Code Editor Text';
+  }
+  
+  // Browser with meaningful title
+  if ((app.includes('chrome') || app.includes('firefox') || app.includes('edge') || app.includes('safari')) && title) {
+    const cleanTitle = title.replace(/ - (google chrome|mozilla firefox|microsoft edge|safari)/gi, '');
+    if (cleanTitle.length > 5 && cleanTitle.length < 60) {
+      return extractKeyWordsFromTitle(cleanTitle);
+    }
+  }
+  
+  // Communication apps
+  if (app.includes('slack') || app.includes('discord') || app.includes('teams')) {
+    return isLongText(text) ? extractSmartSummary(text) : 'Chat Message';
+  }
+  
+  // Email clients
+  if (app.includes('outlook') || app.includes('mail') || app.includes('thunderbird')) {
+    return isLongText(text) ? extractSmartSummary(text) : 'Email Content';
+  }
+  
+  // Document editors
+  if (app.includes('word') || app.includes('notepad') || app.includes('obsidian') || app.includes('notion')) {
+    return extractDocumentTitle(text);
+  }
+  
+  return null; // No strong context clues
+}
+
+// Analyze what the content is PRIMARILY about
+function analyzePrimaryContent(text) {
+  const lines = text.split('\n').filter(l => l.trim());
+  const wordCount = text.split(/\s+/).length;
+  
+  // Single-purpose content (high confidence)
+  if (wordCount <= 10) {
+    if (HEADER_PATTERNS.url.test(text.trim()) && text.trim().split(/\s+/).length <= 2) {
+      return { type: 'single_url', data: text.trim(), confidence: 0.95 };
+    }
+    if (HEADER_PATTERNS.email.test(text.trim()) && text.trim().split(/\s+/).length <= 2) {
+      return { type: 'single_email', data: text.trim(), confidence: 0.95 };
+    }
+    if (HEADER_PATTERNS.phone.test(text.trim()) && text.trim().split(/\s+/).length <= 2) {
+      return { type: 'single_phone', confidence: 0.95 };
+    }
+  }
+  
+  // Code analysis (check proportion)
+  const codeIndicators = countCodeIndicators(text);
+  const codeRatio = codeIndicators / Math.max(1, wordCount / 10); // Code indicators per 10 words
+  if (codeRatio > 0.3 || (looksLikeCode(text) && wordCount < 100)) {
+    return { type: 'code', confidence: Math.min(0.95, codeRatio) };
+  }
+  
+  // Meeting/event content
+  if (HEADER_PATTERNS.meeting.test(text) && (text.includes('time') || text.includes('pm') || text.includes('am'))) {
+    return { type: 'meeting', confidence: 0.8 };
+  }
+  
+  // List detection
+  if (lines.length >= 3 && isListStructure(text)) {
+    return { type: 'list', confidence: 0.8 };
+  }
+  
+  // Conversation detection
+  if (isConversationStructure(text)) {
+    return { type: 'conversation', confidence: 0.7 };
+  }
+  
+  // Document/article (longer content)
+  if (wordCount > 50) {
+    return { type: 'document', confidence: 0.6 };
+  }
+  
+  return { type: 'general', confidence: 0.3 };
+}
+
+// Extract main topic/theme from text (2-3 words max)
+function extractSmartSummary(text) {
+  const words = text.split(/\s+/);
+  
+  // For very short text, use first meaningful words
+  if (words.length <= 6) {
+    return extractKeyWords(text).slice(0, 3).join(' ') || capitalizeWords(words.slice(0, 3));
+  }
+  
+  // For longer text, extract key themes
+  const sentences = text.split(/[.!?]+/).filter(s => s.trim().length > 10);
+  if (sentences.length > 0) {
+    // Try to extract from first meaningful sentence
+    const firstSentence = sentences[0].trim();
+    const keyWords = extractKeyWords(firstSentence);
+    if (keyWords.length >= 2) {
+      return keyWords.slice(0, 3).join(' ');
+    }
+  }
+  
+  // Extract most frequent meaningful words
+  const wordFreq = getWordFrequency(text);
+  const topWords = Object.entries(wordFreq)
+    .filter(([word]) => word.length > 3 && !isStopWord(word))
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([word]) => capitalizeFirst(word));
+  
+  return topWords.length > 0 ? topWords.join(' ') : capitalizeWords(words.slice(0, 3));
+}
+
+// Helper functions
+function isLongText(text) {
+  return text.split(/\s+/).length > 50;
+}
+
+function countCodeIndicators(text) {
+  const codePatterns = [
+    /function\s+\w+/gi, /const\s+\w+/gi, /let\s+\w+/gi, /var\s+\w+/gi,
+    /class\s+\w+/gi, /import\s+/gi, /export\s+/gi, /require\(/gi,
+    /console\.log/gi, /if\s*\(/gi, /for\s*\(/gi, /while\s*\(/gi,
+    /{\s*$/gm, /;\s*$/gm, /=>/gi, /\w+\.\w+\(/gi
+  ];
+  
+  return codePatterns.reduce((count, pattern) => {
+    const matches = text.match(pattern) || [];
+    return count + matches.length;
+  }, 0);
+}
+
+function isListStructure(text) {
+  const lines = text.split('\n').filter(l => l.trim());
+  const listIndicators = lines.filter(line => 
+    /^\s*[-*•]\s/.test(line) || 
+    /^\s*\d+[.)]\s/.test(line) ||
+    /^\s*[a-zA-Z][.)]\s/.test(line)
+  );
+  
+  return listIndicators.length / lines.length > 0.5;
+}
+
+function isConversationStructure(text) {
+  const lines = text.split('\n');
+  const messageIndicators = lines.filter(line =>
+    /^\w+:\s/.test(line) || // "Name: message"
+    /^\[\d+:\d+\]/.test(line) || // Timestamps
+    /^>\s/.test(line) // Quoted messages
+  );
+  
+  return messageIndicators.length >= 2;
+}
+
+function extractMainFunction(text) {
+  const match = text.match(HEADER_PATTERNS.codeFunction);
+  return match ? match[1] : null;
+}
+
+function generateUrlHeader(url) {
+  const match = url.match(HEADER_PATTERNS.url);
+  if (!match) return 'URL';
+  
+  const domain = match[1].toLowerCase();
+  const mainDomain = domain.split('.').slice(-2)[0];
+  
+  const domainMap = {
+    'github': 'GitHub',
+    'youtube': 'YouTube',
+    'stackoverflow': 'Stack Overflow',
+    'linkedin': 'LinkedIn',
+    'twitter': 'Twitter',
+    'medium': 'Medium',
+    'docs': 'Documentation'
+  };
+  
+  return domainMap[mainDomain] || capitalizeFirst(mainDomain);
+}
+
+function generateEmailHeader(email) {
+  const domain = email.split('@')[1];
+  if (!domain) return 'Email';
+  
+  const company = domain.split('.')[0];
+  return company.length < 15 ? capitalizeFirst(company) + ' Email' : 'Email';
+}
+
+function generateCodeHeader(text, confidence) {
+  const lang = detectCodeLanguage(text);
+  const func = extractMainFunction(text);
+  
+  if (func && confidence > 0.7) {
+    return lang ? `${lang} - ${func}` : `Code - ${func}`;
+  }
+  
+  return lang || 'Code';
+}
+
+function generateMeetingHeader(text) {
+  const timeMatch = text.match(HEADER_PATTERNS.time);
+  if (timeMatch) {
+    return `Meeting ${timeMatch[1]}`;
+  }
+  return 'Meeting';
+}
+
+function extractDocumentTitle(text) {
+  const lines = text.split('\n').filter(l => l.trim());
+  if (lines.length === 0) return extractSmartSummary(text);
+  
+  // Try first line if it looks like a title
+  const firstLine = lines[0].trim();
+  if (firstLine.length > 5 && firstLine.length < 50 && !firstLine.endsWith('.')) {
+    const words = extractKeyWords(firstLine);
+    if (words.length > 0) {
+      return words.slice(0, 3).join(' ');
+    }
+  }
+  
+  return extractSmartSummary(text);
+}
+
+function generateListHeader(text) {
+  const firstItem = text.split('\n').find(line => 
+    /^\s*[-*•]\s(.+)/.test(line) || 
+    /^\s*\d+[.)]\s(.+)/.test(line)
+  );
+  
+  if (firstItem) {
+    const content = firstItem.replace(/^\s*[-*•\d+.)]\s*/, '').trim();
+    const words = extractKeyWords(content).slice(0, 2);
+    return words.length > 0 ? words.join(' ') + ' List' : 'List';
+  }
+  
+  return 'List';
+}
+
+function extractKeyWordsFromTitle(title) {
+  const cleaned = title.replace(/[^\w\s-]/g, ' ').trim();
+  const words = extractKeyWords(cleaned);
+  return words.slice(0, 3).join(' ') || cleaned.split(/\s+/).slice(0, 3).join(' ');
+}
+
+function getWordFrequency(text) {
+  const words = text.toLowerCase().match(/\b\w{4,}\b/g) || [];
+  const freq = {};
+  words.forEach(word => {
+    if (!isStopWord(word)) {
+      freq[word] = (freq[word] || 0) + 1;
+    }
+  });
+  return freq;
+}
+
+function isStopWord(word) {
+  const stopWords = new Set([
+    'this', 'that', 'with', 'have', 'will', 'been', 'were', 'said', 'each', 'which',
+    'their', 'time', 'would', 'there', 'could', 'other', 'after', 'first', 'well',
+    'also', 'very', 'what', 'know', 'just', 'work', 'life', 'only', 'new', 'way'
+  ]);
+  return stopWords.has(word.toLowerCase());
+}
+
+function capitalizeWords(words) {
+  return words.filter(w => w && w.length > 0)
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function generateImageHeader(ocrText, source, dimensions) {
+  try {
+    // 1. OCR-based analysis (primary)
+    if (ocrText && ocrText.trim()) {
+      const header = analyzeOCRForHeader(ocrText, source);
+      if (header && header !== 'Untitled') {
+        return header;
+      }
+    }
+    
+    // 2. Source app context (secondary)
+    if (source && source.app) {
+      const appName = source.app.toLowerCase();
+      
+      // App-specific headers
+      const appHeaders = {
+        'code': 'Code Screenshot',
+        'visual studio code': 'VS Code Screenshot',
+        'vscode': 'VS Code Screenshot',
+        'chrome': 'Web Screenshot',
+        'firefox': 'Web Screenshot',
+        'edge': 'Web Screenshot',
+        'safari': 'Web Screenshot',
+        'figma': 'Design Screenshot',
+        'sketch': 'Design Screenshot',
+        'photoshop': 'Photoshop Screenshot',
+        'slack': 'Slack Screenshot',
+        'discord': 'Discord Screenshot',
+        'teams': 'Teams Screenshot',
+        'zoom': 'Zoom Screenshot',
+        'terminal': 'Terminal Screenshot',
+        'cmd': 'Command Prompt',
+        'powershell': 'PowerShell Screenshot'
+      };
+      
+      for (const [key, value] of Object.entries(appHeaders)) {
+        if (appName.includes(key)) {
+          return value;
+        }
+      }
+      
+      // Browser with title context
+      if (source.title && (appName.includes('chrome') || appName.includes('firefox') || appName.includes('edge'))) {
+        const cleanTitle = source.title.replace(/ - Google Chrome| - Mozilla Firefox| - Microsoft Edge/gi, '');
+        const titleWords = extractKeyWords(cleanTitle).slice(0, 3);
+        if (titleWords.length > 0) {
+          return titleWords.join(' ') + ' - Web';
+        }
+      }
+      
+      // Generic app screenshot
+      const cleanAppName = capitalizeFirst(appName.replace(/\.exe$/i, ''));
+      return `${cleanAppName} Screenshot`;
+    }
+    
+    // 3. Dimension-based fallback
+    if (dimensions) {
+      const { w, h } = dimensions;
+      if (w < 200 && h < 200) {
+        return 'Icon/Small Image';
+      }
+      if (w > 1200 || h > 800) {
+        return 'Screenshot';
+      }
+    }
+    
+    return 'Image';
+    
+  } catch (e) {
+    dlog('header:image:error', { msg: e?.message });
+    return 'Image';
+  }
+}
+
+function analyzeOCRForHeader(ocrText, source) {
+  const text = String(ocrText).trim();
+  if (!text) return null;
+  
+  try {
+    // Look for code patterns in OCR
+    if (looksLikeCode(text)) {
+      const funcMatch = text.match(HEADER_PATTERNS.codeFunction);
+      if (funcMatch) {
+        return `Code - ${funcMatch[1]}()`;
+      }
+      
+      const lang = detectCodeLanguage(text);
+      if (lang) {
+        return `${lang} Code Screenshot`;
+      }
+      return 'Code Screenshot';
+    }
+    
+    // Look for email/web content
+    if (text.includes('@') && text.includes('.com')) {
+      return 'Email Screenshot';
+    }
+    
+    if (text.match(/https?:\/\//)) {
+      return 'Web Page Screenshot';
+    }
+    
+    // Look for document titles (first meaningful line)
+    const lines = text.split('\n').filter(line => line.trim().length > 0);
+    if (lines.length > 0) {
+      const firstLine = lines[0].trim();
+      
+      // Skip common UI elements
+      const skipPatterns = /^(home|back|next|previous|menu|settings|file|edit|view|help|ok|cancel|close|save|open)$/i;
+      if (!skipPatterns.test(firstLine) && firstLine.length > 3 && firstLine.length < 50) {
+        const words = extractKeyWords(firstLine);
+        if (words.length > 0) {
+          return words.slice(0, 4).join(' ');
+        }
+      }
+    }
+    
+    // Fallback to key words from OCR
+    const keyWords = extractKeyWords(text);
+    if (keyWords.length >= 2) {
+      return keyWords.slice(0, 3).join(' ') + ' Screenshot';
+    }
+    
+    return null;
+  } catch (e) {
+    dlog('header:ocr:error', { msg: e?.message });
+    return null;
+  }
+}
+
+// Helper functions
+function detectCodeLanguage(text) {
+  const patterns = HEADER_PATTERNS.codeLang;
+  
+  if (patterns.javascript.test(text)) return 'JavaScript';
+  if (patterns.python.test(text)) return 'Python';
+  if (patterns.css.test(text)) return 'CSS';
+  if (patterns.html.test(text)) return 'HTML';
+  if (patterns.sql.test(text)) return 'SQL';
+  if (patterns.json.test(text)) return 'JSON';
+  
+  return null;
+}
+
+function extractKeyWords(text) {
+  const words = String(text)
+    .split(/\s+/)
+    .map(w => w.replace(/[^\w\s]/g, ''))
+    .filter(w => w.length > 2)
+    .filter(w => !/^(the|and|or|but|in|on|at|to|for|of|with|by)$/i.test(w))
+    .slice(0, 5)
+    .map(capitalizeFirst);
+    
+  return words;
+}
+
+function extractParticipants(text) {
+  // Simple extraction of names from meeting text
+  const namePattern = /\b([A-Z][a-z]+\s+[A-Z][a-z]+)\b/g;
+  const matches = text.match(namePattern);
+  
+  if (matches && matches.length <= 3) {
+    return matches.slice(0, 2).join(' & ');
+  }
+  
+  // Look for team mentions
+  const teamPattern = /\b(design|engineering|marketing|sales|product|dev|team)\b/gi;
+  const teamMatch = text.match(teamPattern);
+  if (teamMatch) {
+    return capitalizeFirst(teamMatch[0]) + ' Team';
+  }
+  
+  return null;
+}
+
+function capitalizeFirst(str) {
+  const s = String(str || '').trim();
+  return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
+}
+
+function truncateHeader(header, maxLength = 50) {
+  if (!header || header.length <= maxLength) return header;
+  return header.slice(0, maxLength - 3) + '...';
+}
+
 function startClipboardPolling() {
   if (clipboardPollTimer) clearInterval(clipboardPollTimer);
-  clipboardPollTimer = setInterval(async () => {
+  
+  const pollClipboard = async () => {
+    const pollStart = Date.now();
+    perfStats.totalPolls++;
+    
     try {
-      const img = readClipboardImageRobust();
-      if (img && !img.isEmpty()) {
-        const png = img.toPNG();
-        const hash = sha1(png);
-        if (hash !== lastImageHash) {
-          lastImageHash = hash;
-          const source = captureSourceIfEnabled();
+      let changed = false;
+      
+      // Check images first (typically faster)
+      try {
+        const img = readClipboardImageRobust();
+        if (img && !img.isEmpty()) {
+          const png = img.toPNG();
+          const hash = sha1(png);
+          if (hash !== lastImageHash) {
+            lastImageHash = hash;
+            changed = true;
+            clipboardCheckCount = 0; // Reset idle counter
+            
+            const source = captureSourceIfEnabled();
+            const id = Date.now();
+            const meta = await persistImage(img, id);
+            
+            // Create initial item with smart header
+            const newItem = { 
+              id, 
+              type: 'image', 
+              pinned: false, 
+              ts: new Date().toISOString(), 
+              source, 
+              tags: [], 
+              ...meta 
+            };
+            
+            // Generate initial header (without OCR text yet)
+            const initialHeader = generateSmartHeader(newItem);
+            newItem.header = truncateHeader(initialHeader);
+            
+            const items = historyStore.get('items') || [];
+            items.unshift(newItem);
+            sortItems(items);
+            await enforceMaxAndCleanup(items);
+            historyStore.set('items', items);
+            overlayWin?.webContents?.send('history:update', items);
+            dlog('capture:image', { 
+              id, 
+              filePath: meta.filePath, 
+              wh: meta.wh, 
+              header: newItem.header,
+              source: source?.app || 'unknown'
+            });
 
+            // Queue OCR processing with overflow protection
+            if (ocrQueue.length < OCR_CONFIG.queueLimit) {
+              ocrQueue.push({ id, filePath: meta.filePath });
+              processOcrQueue(); // Non-blocking
+            } else {
+              dlog('ocr:queue:overflow', { queueSize: ocrQueue.length, dropped: id });
+            }
+            
+            perfStats.avgPollTime = (perfStats.avgPollTime + (Date.now() - pollStart)) / 2;
+            return;
+          }
+        }
+      } catch (e) {
+        dlog('capture:image:error', { msg: e?.message });
+      }
+
+      // Check text
+      const text = clipboard.readText();
+      if (text && text.trim() && text !== lastClipboardText) {
+        lastClipboardText = text;
+        changed = true;
+        clipboardCheckCount = 0; // Reset idle counter
+
+        const source = captureSourceIfEnabled();
+        const items = historyStore.get('items') || [];
+        
+        // Avoid duplicate consecutive text entries
+        if (!items.length || items[0].type !== 'text' || items[0].text !== text) {
           const id = Date.now();
-          const meta = await persistImage(img, id);
-          const items = historyStore.get('items') || [];
-          items.unshift({ id, type: 'image', pinned: false, ts: new Date().toISOString(), source, tags: [], ...meta });
+          const tags = autoTagsForText(text);
+          
+          // Create item with smart header
+          const newItem = { 
+            id, 
+            type: 'text', 
+            text, 
+            pinned: false, 
+            ts: new Date().toISOString(), 
+            source, 
+            tags 
+          };
+          
+          // Generate smart header
+          const smartHeader = generateSmartHeader(newItem);
+          newItem.header = truncateHeader(smartHeader);
+          
+          items.unshift(newItem);
           sortItems(items);
           await enforceMaxAndCleanup(items);
           historyStore.set('items', items);
           overlayWin?.webContents?.send('history:update', items);
-          dlog('capture:image', { id, filePath: meta.filePath, wh: meta.wh });
-
-          // OCR async
-          (async () => {
-            try {
-              const worker = await getOcrWorker();
-              const buf = await fsp.readFile(meta.filePath);
-              const { data } = await worker.recognize(buf);
-              const text = (data?.text || '').trim();
-              if (!text) return;
-              const itemsNow = historyStore.get('items') || [];
-              const idx = itemsNow.findIndex(i => i.id === id);
-              if (idx >= 0) {
-                const addTags = autoTagsForText(text);
-                const existing = Array.from(new Set(itemsNow[idx].tags || []));
-                itemsNow[idx].ocrText = text.length > 12000 ? text.slice(0, 12000) : text;
-                itemsNow[idx].tags = Array.from(new Set([...existing, ...addTags, 'ocr']));
-                historyStore.set('items', itemsNow);
-                overlayWin?.webContents?.send('history:update', itemsNow);
-                dlog('ocr:done', { id, tags: addTags });
-              }
-            } catch (e) {
-              dlog('ocr:error', { msg: e?.message });
-            }
-          })();
-          return;
+          dlog('capture:text', { id, tags, len: text.length, header: newItem.header });
         }
       }
+      
+      // Adaptive polling: slow down when idle
+      if (!changed) {
+        clipboardCheckCount++;
+        if (clipboardCheckCount >= IDLE_THRESHOLD) {
+          adaptiveInterval = Math.min(MAX_INTERVAL, adaptiveInterval * 1.2);
+        }
+      } else {
+        adaptiveInterval = MIN_INTERVAL; // Speed up after activity
+      }
+      
+      perfStats.avgPollTime = (perfStats.avgPollTime + (Date.now() - pollStart)) / 2;
+      updatePerfStats();
+      
     } catch (e) {
-      dlog('capture:image:error', { msg: e?.message });
+      dlog('clipboard:poll:error', { msg: e?.message });
     }
-
-    // Text
-    const text = clipboard.readText();
-    if (!text || !text.trim()) return;
-    if (text === lastClipboardText) return;
-    lastClipboardText = text;
-
-    const source = captureSourceIfEnabled();
-
-    const items = historyStore.get('items') || [];
-    if (items.length && items[0].type === 'text' && items[0].text === text) return;
-
-    const id = Date.now();
-    const tags = autoTagsForText(text);
-    items.unshift({ id, type: 'text', text, pinned: false, ts: new Date().toISOString(), source, tags });
-    sortItems(items);
-    await enforceMaxAndCleanup(items);
-    historyStore.set('items', items);
-    overlayWin?.webContents?.send('history:update', items);
-    dlog('capture:text', { id, tags, len: text.length });
-  }, 200);
+    
+    // Schedule next poll with adaptive interval
+    clipboardPollTimer = setTimeout(pollClipboard, adaptiveInterval);
+  };
+  
+  // Start polling
+  clipboardPollTimer = setTimeout(pollClipboard, adaptiveInterval);
 }
 
 /* ---------- AutoHotkey Smart Paste Integration v2 ---------- */
@@ -1295,6 +2183,51 @@ ipcMain.handle('stack:pasteNext', async (_e, data) => {
 
 
 
+// Header generation statistics
+let headerStats = {
+  totalGenerated: 0,
+  textHeaders: 0,
+  imageHeaders: 0,
+  ocrUpdates: 0,
+  avgGenerationTime: 0
+};
+
+// Performance monitoring API
+ipcMain.handle('perf:getStats', () => ({
+  clipboard: {
+    pollsPerSecond: Math.round(perfStats.pollsPerSecond * 100) / 100,
+    avgPollTime: Math.round(perfStats.avgPollTime * 100) / 100,
+    adaptiveInterval,
+    totalPolls: perfStats.totalPolls
+  },
+  ocr: {
+    totalProcessed: ocrStats.totalProcessed,
+    avgProcessingTime: Math.round(ocrStats.avgProcessingTime),
+    successRate: Math.round(ocrStats.successRate * 100) / 100,
+    errors: ocrStats.errors,
+    queueSize: ocrQueue.length,
+    workerPoolSize: ocrWorkerPool.length,
+    activeWorkers: ocrWorkerPool.filter(w => w.busy).length
+  },
+  headers: {
+    totalGenerated: headerStats.totalGenerated,
+    textHeaders: headerStats.textHeaders,
+    imageHeaders: headerStats.imageHeaders,
+    ocrUpdates: headerStats.ocrUpdates,
+    avgGenerationTime: Math.round(headerStats.avgGenerationTime * 100) / 100
+  },
+  memory: {
+    usage: process.memoryUsage(),
+    heapUsed: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
+    external: Math.round(process.memoryUsage().external / 1024 / 1024)
+  },
+  app: {
+    uptime: Math.round(process.uptime()),
+    version: app.getVersion(),
+    platform: process.platform
+  }
+}));
+
 ipcMain.handle('settings:get', () => ({
   theme: settingsStore.get('theme'),
   hotkey: settingsStore.get('hotkey'),
@@ -1484,26 +2417,69 @@ if (!gotLock) app.quit();
 else {
   app.on('second-instance', () => showOverlay());
   app.whenReady().then(async () => {
-    dlog('app:ready', { userData: app.getPath('userData') });
+    const appStartTime = Date.now();
+    dlog('app:ready:start', { userData: app.getPath('userData') });
     
-    // Initialize shortcuts file
-    await initShortcutsFile();
+    // Phase 1: Critical startup tasks (must complete before UI)
+    const criticalTasks = [
+      () => createOverlay(),
+      () => registerHotkey(),
+    ];
     
-    // Cleanup orphaned shortcuts on startup
-    const items = historyStore.get('items') || [];
-    const validIds = items.map(i => i.id);
-    cleanupShortcuts(validIds);
-    
-    createOverlay();
-    registerHotkey();
-    startClipboardPolling();
-    if (settingsStore.get('captureContext')) await startActiveWinSampling();
-    startTextMonitoring();
-    
-    // Register expansion hotkey
-    if (settingsStore.get('enableTextShortcuts') && settingsStore.get('enableSmartPaste')) {
-      registerExpansionHotkey();
+    for (const task of criticalTasks) {
+      try {
+        await task();
+      } catch (e) {
+        dlog('app:critical:error', { msg: e?.message });
+      }
     }
+    
+    const criticalTime = Date.now() - appStartTime;
+    dlog('app:critical:done', { time: criticalTime });
+    
+    // Phase 2: Background initialization (can happen after UI is ready)
+    process.nextTick(async () => {
+      try {
+        // Start clipboard polling immediately
+        startClipboardPolling();
+        
+        // Initialize other features in parallel
+        const backgroundTasks = [
+          initShortcutsFile,
+          () => {
+            const items = historyStore.get('items') || [];
+            const validIds = items.map(i => i.id);
+            cleanupShortcuts(validIds);
+          },
+          () => settingsStore.get('captureContext') ? startActiveWinSampling() : Promise.resolve(),
+          startTextMonitoring,
+          () => {
+            if (settingsStore.get('enableTextShortcuts') && settingsStore.get('enableSmartPaste')) {
+              registerExpansionHotkey();
+            }
+          }
+        ];
+        
+        const results = await Promise.allSettled(backgroundTasks.map(task => 
+          Promise.resolve().then(task)
+        ));
+        
+        const errors = results.filter(r => r.status === 'rejected');
+        if (errors.length > 0) {
+          dlog('app:background:errors', { count: errors.length, errors: errors.map(e => e.reason?.message) });
+        }
+        
+        const totalTime = Date.now() - appStartTime;
+        dlog('app:ready:complete', { 
+          criticalTime, 
+          totalTime, 
+          backgroundTasks: backgroundTasks.length,
+          errors: errors.length 
+        });
+      } catch (e) {
+        dlog('app:background:error', { msg: e?.message });
+      }
+    });
   });
   app.on('will-quit', () => { 
     globalShortcut.unregisterAll(); 
