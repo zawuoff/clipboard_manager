@@ -43,6 +43,102 @@ let items = [];
 let filtered = [];
 let selectedIndex = 0;
 let currentTab = localStorage.getItem('clip_tab') || 'recent';
+
+/* ---------- Edit State Management ---------- */
+let editingStates = new Map(); // itemId -> { isEditing: boolean, originalText: string, titleEl: Element, editBtn: Element }
+
+/* Edit state helper functions */
+function enterEditMode(itemId, titleEl, editBtn) {
+  console.log('[DEBUG] enterEditMode called:', { itemId, titleEl, editBtn });
+
+  // Exit any other edit modes first
+  for (let [id, state] of editingStates) {
+    if (state.isEditing && id !== itemId) {
+      exitEditMode(id, true); // true = save changes
+    }
+  }
+
+  const originalText = titleEl.textContent.trim();
+  console.log('[DEBUG] Original text:', originalText);
+
+  editingStates.set(itemId, {
+    isEditing: true,
+    originalText: originalText,
+    titleEl: titleEl,
+    editBtn: editBtn
+  });
+
+  // Visual changes
+  console.log('[DEBUG] Applying visual changes...');
+  titleEl.classList.add('editing');
+  editBtn.innerHTML = '✅'; // Change to checkmark
+  editBtn.classList.add('save-mode');
+  editBtn.title = 'Save header';
+
+  // Focus and select
+  titleEl.focus();
+  titleEl.select();
+  console.log('[DEBUG] Edit mode entered successfully');
+}
+
+function exitEditMode(itemId, save = true) {
+  const state = editingStates.get(itemId);
+  if (!state || !state.isEditing) return;
+
+  const { titleEl, editBtn, originalText } = state;
+
+  if (save) {
+    // Save the changes
+    const newText = titleEl.textContent.trim() || 'Untitled';
+    if (newText !== originalText) {
+      updateHeaderText(itemId, newText);
+    }
+  } else {
+    // Cancel - restore original
+    titleEl.textContent = originalText;
+  }
+
+  // Visual changes
+  titleEl.classList.remove('editing');
+  editBtn.innerHTML = '✏️'; // Change back to edit icon
+  editBtn.classList.remove('save-mode');
+  editBtn.title = 'Edit header';
+
+  // Clear state
+  editingStates.set(itemId, { ...state, isEditing: false });
+
+  // Remove focus
+  titleEl.blur();
+}
+
+function toggleEditMode(itemId, titleEl, editBtn) {
+  console.log('[DEBUG] toggleEditMode called:', { itemId, titleEl, editBtn });
+  const state = editingStates.get(itemId);
+  const isCurrentlyEditing = state?.isEditing || false;
+  console.log('[DEBUG] Current state:', { state, isCurrentlyEditing });
+
+  if (isCurrentlyEditing) {
+    console.log('[DEBUG] Exiting edit mode');
+    exitEditMode(itemId, true); // Save changes
+  } else {
+    console.log('[DEBUG] Entering edit mode');
+    enterEditMode(itemId, titleEl, editBtn);
+  }
+}
+
+async function updateHeaderText(itemId, newText) {
+  // Update local data
+  const item = items.find(i => i.id === itemId);
+  if (item) {
+    item.header = newText;
+    try {
+      await window.api.updateHistoryItem(itemId, { header: newText });
+    } catch (err) {
+      console.error('[header] update error', err);
+    }
+  }
+}
+
 let cfg = {
   theme: 'dark',
   hotkey: 'CommandOrControl+Shift+Space',
@@ -929,34 +1025,57 @@ function setupHeaderEditing() {
   cardTitles.forEach(titleEl => {
     titleEl.addEventListener('blur', async () => {
       const id = Number(titleEl.dataset.id);
-      const newHeader = titleEl.textContent.trim() || 'Untitled';
-      
-      // Update local data
-      const item = items.find(i => i.id === id);
-      if (item && item.header !== newHeader) {
-        item.header = newHeader;
-        try {
-          await window.api.updateHistoryItem(id, { header: newHeader });
-        } catch (err) {
-          console.error('[header] update error', err);
+      const state = editingStates.get(id);
+
+      // Only handle blur if we're in editing mode
+      if (state?.isEditing) {
+        exitEditMode(id, true); // Save changes
+      }
+    });
+
+    titleEl.addEventListener('keydown', (e) => {
+      const id = Number(titleEl.dataset.id);
+      const state = editingStates.get(id);
+
+      // Only handle keys if we're in editing mode
+      if (state?.isEditing) {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          exitEditMode(id, true); // Save changes
+        }
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          exitEditMode(id, false); // Cancel changes
         }
       }
     });
-    
-    titleEl.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        titleEl.blur();
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        // Restore original text
-        const id = Number(titleEl.dataset.id);
-        const item = items.find(i => i.id === id);
-        if (item) {
-          titleEl.textContent = item.header || 'Untitled';
+
+    // Handle direct clicks on header text - enter edit mode
+    titleEl.addEventListener('click', (e) => {
+      console.log('🛡️ Header title click - entering edit mode');
+      e.stopPropagation(); // Prevent bubbling to row click handler
+
+      const id = Number(titleEl.dataset.id);
+      const editBtn = titleEl.parentElement.querySelector('.header-icons .edit-header-btn');
+
+      if (editBtn && id) {
+        // Only enter edit mode if not already in edit mode
+        const state = editingStates.get(id);
+        if (!state?.isEditing) {
+          enterEditMode(id, titleEl, editBtn);
         }
-        titleEl.blur();
+      }
+    });
+  });
+
+  // Also prevent clicks on the entire header area (not just title)
+  const cardHeaders = resultsEl.querySelectorAll('.card-header');
+  cardHeaders.forEach(headerEl => {
+    headerEl.addEventListener('click', (e) => {
+      // Only prevent propagation if clicking on header area, not on action buttons
+      if (!e.target.closest('.header-icons button')) {
+        console.log('🛡️ Header area click - preventing auto-paste');
+        e.stopPropagation(); // Prevent bubbling to row click handler
       }
     });
   });
@@ -1417,6 +1536,8 @@ if (tabsEl) {
 
 /* Row click delegation */
 resultsEl?.addEventListener('click', async (e) => {
+  console.log('[DEBUG] Click detected on:', e.target, 'with classes:', e.target.className);
+
   // Helper to find row item id robustly (works even if buttons lack data-id)
   const getRowItemId = () => {
     const row = e.target.closest('li.row');
@@ -1515,12 +1636,14 @@ resultsEl?.addEventListener('click', async (e) => {
   // Edit header button
   const editHeaderBtn = e.target.closest('.edit-header-btn');
   if (editHeaderBtn) {
+    console.log('[DEBUG] Edit button clicked');
     e.preventDefault(); e.stopPropagation();
     const id = Number(editHeaderBtn.dataset.id);
-    const titleEl = editHeaderBtn.parentElement.querySelector('.card-title');
+    const titleEl = editHeaderBtn.closest('.card-header').querySelector('.card-title');
     if (titleEl) {
-      titleEl.focus();
-      titleEl.select();
+      toggleEditMode(id, titleEl, editHeaderBtn);
+    } else {
+      console.log('[ERROR] Could not find title element for edit');
     }
     return;
   }
