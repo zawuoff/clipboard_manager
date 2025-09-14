@@ -1018,6 +1018,7 @@ function showExpandedTextPopup(item) {
 function showInfoPopup(item) {
   return new Promise((resolve) => {
     const backdrop = document.createElement('div');
+    backdrop.className = 'info-popup';
     backdrop.style.cssText = `
       position: fixed; inset: 0; background: rgba(0,0,0,0.7); z-index: 9999;
       display: flex; align-items: center; justify-content: center; padding: 20px;`;
@@ -1069,8 +1070,8 @@ function showInfoPopup(item) {
         ${contentPreview}
         ${item.filePath ? `<div><strong>📁 File Path:</strong> <code style="background: var(--primary); padding: 2px 4px; border-radius: 4px; font-size: 12px;">${escapeHTML(item.filePath)}</code></div>` : ''}
         <div style="margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; gap: 8px; justify-content: flex-end;">
-          <button onclick="window.editClipItem && window.editClipItem('${item.id}')" style="padding: 6px 12px; background: var(--accent); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">✏️ Edit</button>
-          <button onclick="window.deleteClipItem && window.deleteClipItem('${item.id}')" style="padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">🗑️ Delete</button>
+          <button id="edit-clip-btn" data-item-id="${item.id}" style="padding: 6px 12px; background: var(--accent); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">✏️ Edit</button>
+          <button id="delete-clip-btn" data-item-id="${item.id}" style="padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">🗑️ Delete</button>
         </div>
       </div>
     `;
@@ -1079,14 +1080,45 @@ function showInfoPopup(item) {
     document.body.appendChild(backdrop);
 
     const closeBtn = popup.querySelector('#close-info-popup');
+    const editBtn = popup.querySelector('#edit-clip-btn');
+    const deleteBtn = popup.querySelector('#delete-clip-btn');
+
     const close = () => {
       try { document.body.removeChild(backdrop); } catch {}
       resolve();
     };
 
-    closeBtn.addEventListener('click', close);
+    // Close button with event propagation prevention
+    closeBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      close();
+    });
+
+    // Edit button with event propagation prevention
+    editBtn?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const itemId = e.target.dataset.itemId;
+      close();
+      await editClipItem(itemId);
+    });
+
+    // Delete button with event propagation prevention
+    deleteBtn?.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      const itemId = e.target.dataset.itemId;
+      close();
+      await deleteClipItem(itemId);
+    });
+
+    // Backdrop click to close (only if clicking the backdrop itself)
     backdrop.addEventListener('click', (e) => {
-      if (e.target === backdrop) close();
+      if (e.target === backdrop) {
+        e.stopPropagation();
+        close();
+      }
     });
 
     document.addEventListener('keydown', function escListener(e) {
@@ -1567,7 +1599,18 @@ resultsEl?.addEventListener('click', async (e) => {
 
 /* Click outside closes */
 document.addEventListener('mousedown', (e) => {
-  if (!e.target.closest('.overlay')) window.api.hideOverlay();
+  // Don't minimize if clicking inside any popup/modal
+  if (e.target.closest('.info-popup, .modal, .popup')) {
+    return; // Exit early, don't minimize
+  }
+
+  // Don't minimize if clicking inside main overlay
+  if (e.target.closest('.overlay')) {
+    return; // Exit early, don't minimize
+  }
+
+  // Only minimize if truly clicking outside everything
+  window.api.hideOverlay();
 });
 
 /* ---------- Collections: hub & prompt ---------- */
@@ -2190,3 +2233,45 @@ saveBtn?.addEventListener('click', async () => {
     }
   });
 })();
+
+/* ---------- Edit and Delete Clip Item Functions ---------- */
+async function editClipItem(itemId) {
+  const item = state.clipboard.find(it => it.id === itemId);
+  if (!item) return;
+
+  const result = await showPromptDialog('Edit Item', 'text', item.text || '', 'Save', 'Cancel', 'Remove');
+  if (result && result.action === 'save') {
+    // Update the item text
+    item.text = result.value;
+    item.header = result.value.slice(0, 40);
+
+    // Save to storage
+    await window.api.updateClipboardItem(itemId, { text: result.value, header: item.header });
+
+    // Re-render the current view
+    applyFilter();
+  } else if (result && result.action === 'remove') {
+    await deleteClipItem(itemId);
+  }
+}
+
+async function deleteClipItem(itemId) {
+  const item = state.clipboard.find(it => it.id === itemId);
+  if (!item) return;
+
+  const confirmed = await showConfirmDialog(
+    'Delete Item',
+    `Are you sure you want to delete this item?\n\n"${(item.text || item.header || 'Untitled').slice(0, 100)}${(item.text || item.header || '').length > 100 ? '...' : ''}"`
+  );
+
+  if (confirmed) {
+    // Remove from local state
+    state.clipboard = state.clipboard.filter(it => it.id !== itemId);
+
+    // Remove from storage
+    await window.api.removeClipboardItem(itemId);
+
+    // Re-render the current view
+    applyFilter();
+  }
+}
