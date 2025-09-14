@@ -349,6 +349,21 @@ function showOverlay() {
   console.log('[overlay] show (inactive)');
 }
 
+function toggleOverlay() {
+  const win = overlayWin;
+
+  // If window exists and is visible, hide it
+  if (win && win.isVisible()) {
+    win.hide();
+    console.log('[overlay] toggle: hide');
+    return;
+  }
+
+  // Otherwise, show it (reuse existing showOverlay logic)
+  showOverlay();
+  console.log('[overlay] toggle: show');
+}
+
 
 
 
@@ -358,8 +373,8 @@ function showOverlay() {
 function registerHotkey() {
   const hk = (settingsStore.get('hotkey') || 'CommandOrControl+Shift+Space').trim();
   globalShortcut.unregisterAll();
-  const ok = globalShortcut.register(hk, showOverlay);
-  if (!ok) globalShortcut.register('CommandOrControl+Shift+Space', showOverlay);
+  const ok = globalShortcut.register(hk, toggleOverlay);
+  if (!ok) globalShortcut.register('CommandOrControl+Shift+Space', toggleOverlay);
 }
 
 /* ---------- Clipboard polling (text + images + OCR) ---------- */
@@ -1718,6 +1733,15 @@ ipcMain.handle('delete-history-item', async (_e, id) => {
 
 ipcMain.handle('open-url', async (_event, url) => {
   try { await shell.openExternal(url); return true; } catch { return false; }
+});
+
+// Handle overlay hide requests
+ipcMain.handle('overlay:hide', () => {
+  if (overlayWin && overlayWin.isVisible()) {
+    overlayWin.hide();
+    console.log('[overlay] hide (via IPC)');
+  }
+  return true;
 });
 
 // --- Collections store & IPC ---
