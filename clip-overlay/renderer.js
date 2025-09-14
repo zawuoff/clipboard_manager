@@ -655,18 +655,17 @@ function renderDirect(list) {
       li.innerHTML = `
         <div class="card-header">
           <h3 class="card-title" contenteditable="true" data-id="${it.id}">${escapeHTML(it.header || 'Untitled')}</h3>
-          <button class="edit-header-btn" data-id="${it.id}" title="Edit header">✏️</button>
+          <div class="header-icons">
+            ${it.source || it.wh ? `<button class="info-btn" data-id="${it.id}" title="Show details">ℹ️</button>` : ''}
+            <button class="edit-header-btn" data-id="${it.id}" title="Edit header">✏️</button>
+          </div>
         </div>
-        <div class="card-metadata">
-          ${new Date(it.ts || Date.now()).toLocaleString()}
-          ${it.source || it.wh ? `<button class="info-btn" data-id="${it.id}" title="Show details">ℹ️</button>` : ''}
-        </div>
-        <div class="card-content">
+        <div class="card-content image-content">
           <div class="thumbwrap">
             <img class="thumb" src="${it.thumb}" alt="Clipboard image" />
           </div>
         </div>
-        <div class="tags"></div>
+        <div class="tags" style="display: none;"></div>
         <div class="card-actions">
           <div class="card-actions-left">
             ${iconBtn('pin-btn', 'star', it.pinned ? 'Unpin' : 'Pin', it.pinned, it.id)}
@@ -702,17 +701,16 @@ function renderDirect(list) {
       li.innerHTML = `
         <div class="card-header">
           <h3 class="card-title" contenteditable="true" data-id="${it.id}">${escapeHTML(it.header || 'Untitled')}</h3>
-          <button class="edit-header-btn" data-id="${it.id}" title="Edit header">✏️</button>
+          <div class="header-icons">
+            ${it.source ? `<button class="info-btn" data-id="${it.id}" title="Show details">ℹ️</button>` : ''}
+            <button class="edit-header-btn" data-id="${it.id}" title="Edit header">✏️</button>
+          </div>
         </div>
-        <div class="card-metadata">
-          ${new Date(it.ts || Date.now()).toLocaleString()}
-          ${it.source ? `<button class="info-btn" data-id="${it.id}" title="Show details">ℹ️</button>` : ''}
-        </div>
-        <div class="card-content">
+        <div class="card-content text-content">
           <div class="primary">${primaryHTML}</div>
           ${rawPrimary.length > 100 ? `<button class="expand-btn" data-id="${it.id}" title="View full text">...</button>` : ''}
         </div>
-        <div class="tags"></div>
+        <div class="tags" style="display: none;"></div>
         <div class="card-actions">
           <div class="card-actions-left">
             ${iconBtn('pin-btn', 'star', it.pinned ? 'Unpin' : 'Pin', it.pinned, it.id)}
@@ -836,18 +834,17 @@ function createListItem(it, qobj, textNeedle) {
     li.innerHTML = `
       <div class="card-header">
         <h3 class="card-title" contenteditable="true" data-id="${it.id}">${escapeHTML(it.header || 'Untitled')}</h3>
-        <button class="edit-header-btn" data-id="${it.id}" title="Edit header">✏️</button>
+        <div class="header-icons">
+          ${it.source || it.wh ? `<button class="info-btn" data-id="${it.id}" title="Show details">ℹ️</button>` : ''}
+          <button class="edit-header-btn" data-id="${it.id}" title="Edit header">✏️</button>
+        </div>
       </div>
-      <div class="card-metadata">
-        ${new Date(it.ts || Date.now()).toLocaleString()}
-        ${it.source || it.wh ? `<button class="info-btn" data-id="${it.id}" title="Show details">ℹ️</button>` : ''}
-      </div>
-      <div class="card-content">
+      <div class="card-content image-content">
         <div class="thumbwrap">
           <img class="thumb" src="${it.thumb}" alt="Clipboard image" />
         </div>
       </div>
-      <div class="tags"></div>
+      <div class="tags" style="display: none;"></div>
       <div class="card-actions">
         <div class="card-actions-left">
           ${iconBtn('pin-btn', 'star', it.pinned ? 'Unpin' : 'Pin', it.pinned, it.id)}
@@ -870,17 +867,16 @@ function createListItem(it, qobj, textNeedle) {
     li.innerHTML = `
       <div class="card-header">
         <h3 class="card-title" contenteditable="true" data-id="${it.id}">${escapeHTML(it.header || 'Untitled')}</h3>
-        <button class="edit-header-btn" data-id="${it.id}" title="Edit header">✏️</button>
+        <div class="header-icons">
+          ${it.source ? `<button class="info-btn" data-id="${it.id}" title="Show details">ℹ️</button>` : ''}
+          <button class="edit-header-btn" data-id="${it.id}" title="Edit header">✏️</button>
+        </div>
       </div>
-      <div class="card-metadata">
-        ${new Date(it.ts || Date.now()).toLocaleString()}
-        ${it.source ? `<button class="info-btn" data-id="${it.id}" title="Show details">ℹ️</button>` : ''}
-      </div>
-      <div class="card-content">
+      <div class="card-content text-content">
         <div class="primary">${primaryHTML}</div>
         ${rawPrimary.length > 100 ? `<button class="expand-btn" data-id="${it.id}" title="View full text">...</button>` : ''}
       </div>
-      <div class="tags"></div>
+      <div class="tags" style="display: none;"></div>
       <div class="card-actions">
         <div class="card-actions-left">
           ${iconBtn('pin-btn', 'star', it.pinned ? 'Unpin' : 'Pin', it.pinned, it.id)}
@@ -1032,25 +1028,50 @@ function showInfoPopup(item) {
       border-radius: var(--border-radius); box-shadow: var(--shadow); padding: 24px;
       position: relative;`;
 
-    const sourceInfo = item.source ? 
-      `<div><strong>Source App:</strong> ${escapeHTML(item.source.app || 'Unknown')}</div>
-       ${item.source.title ? `<div><strong>Window Title:</strong> ${escapeHTML(item.source.title)}</div>` : ''}` : 
-      '<div>No source information available</div>';
+    const sourceInfo = item.source ?
+      `<div><strong>📱 Source App:</strong> ${escapeHTML(item.source.app || 'Unknown')}</div>
+       ${item.source.title ? `<div><strong>🪟 Window Title:</strong> ${escapeHTML(item.source.title)}</div>` : ''}` : '';
 
-    const sizeInfo = item.wh ? 
-      `<div><strong>Image Size:</strong> ${item.wh.w} × ${item.wh.h} pixels</div>` : '';
+    const sizeInfo = item.wh ?
+      `<div><strong>📏 Image Size:</strong> ${item.wh.w} × ${item.wh.h} pixels</div>` : '';
+
+    // Tags section with interactive tags
+    const tagsInfo = item.tags && item.tags.length > 0 ?
+      `<div><strong>🏷️ Tags:</strong> <div style="margin-top: 4px; display: flex; flex-wrap: wrap; gap: 4px;">
+        ${item.tags.map(tag => `<span style="display: inline-flex; align-items: center; gap: 2px; padding: 2px 8px; border-radius: 999px; background: var(--accent); color: white; font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.015em;">${escapeHTML(tag)}</span>`).join('')}
+      </div></div>` : '<div><strong>🏷️ Tags:</strong> None</div>';
+
+    // OCR text section for images
+    const ocrInfo = item.type === 'image' && item.ocrText ?
+      `<div><strong>📄 OCR Text:</strong> <div style="background: var(--primary); padding: 12px; border-radius: 8px; margin-top: 4px; font-family: monospace; font-size: 12px; white-space: pre-wrap; max-height: 120px; overflow-y: auto;">${escapeHTML(item.ocrText)}</div></div>` : '';
+
+    // Text shortcut information
+    const shortcutInfo = item.shortcut ?
+      `<div><strong>⌨️ Text Shortcut:</strong> <code style="background: var(--success); color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">${escapeHTML(item.shortcut)}</code></div>` : '';
+
+    // Full content preview for text items
+    const contentPreview = item.type !== 'image' && item.text ?
+      `<div><strong>📄 Full Content:</strong> <div style="background: var(--primary); padding: 12px; border-radius: 8px; margin-top: 4px; font-size: 12px; line-height: 1.4; max-height: 200px; overflow-y: auto; white-space: pre-wrap;">${escapeHTML(item.text)}</div></div>` : '';
 
     popup.innerHTML = `
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-        <h3 style="margin: 0; color: var(--text);">Item Details</h3>
+        <h3 style="margin: 0; color: var(--text);">${escapeHTML(item.header || 'Untitled')}</h3>
         <button id="close-info-popup" style="background: none; border: none; font-size: 18px; cursor: pointer; color: var(--text-dim);">×</button>
       </div>
-      <div style="color: var(--text); line-height: 1.6; gap: 12px; display: flex; flex-direction: column;">
-        <div><strong>Created:</strong> ${new Date(item.ts || Date.now()).toLocaleString()}</div>
-        <div><strong>Type:</strong> ${item.type === 'image' ? 'Image' : 'Text'}</div>
+      <div style="color: var(--text); line-height: 1.6; gap: 12px; display: flex; flex-direction: column; max-height: 70vh; overflow-y: auto;">
+        <div><strong>📅 Created:</strong> ${new Date(item.ts || Date.now()).toLocaleString()}</div>
+        <div><strong>📄 Type:</strong> ${item.type === 'image' ? 'Image' : 'Text'}</div>
         ${sizeInfo}
         ${sourceInfo}
-        ${item.filePath ? `<div><strong>File Path:</strong> <code style="background: var(--primary); padding: 2px 4px; border-radius: 4px; font-size: 12px;">${escapeHTML(item.filePath)}</code></div>` : ''}
+        ${tagsInfo}
+        ${ocrInfo}
+        ${shortcutInfo}
+        ${contentPreview}
+        ${item.filePath ? `<div><strong>📁 File Path:</strong> <code style="background: var(--primary); padding: 2px 4px; border-radius: 4px; font-size: 12px;">${escapeHTML(item.filePath)}</code></div>` : ''}
+        <div style="margin-top: 8px; padding-top: 12px; border-top: 1px solid var(--border-subtle); display: flex; gap: 8px; justify-content: flex-end;">
+          <button onclick="window.editClipItem && window.editClipItem('${item.id}')" style="padding: 6px 12px; background: var(--accent); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">✏️ Edit</button>
+          <button onclick="window.deleteClipItem && window.deleteClipItem('${item.id}')" style="padding: 6px 12px; background: #ef4444; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">🗑️ Delete</button>
+        </div>
       </div>
     `;
 
