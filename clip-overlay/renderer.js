@@ -2190,6 +2190,18 @@ settingsBtn?.addEventListener('click', () => {
 closeBtn?.addEventListener('click', () => settingsEl?.classList.remove('open'));
 refreshPerfBtn?.addEventListener('click', updatePerformanceMonitor);
 
+// Request feature button
+document.querySelector('.request-feature-link')?.addEventListener('click', async (e) => {
+  e.preventDefault();
+  e.stopPropagation();
+  try {
+    await window.api.openUrl('https://snippetstash.featurebase.app/');
+    console.log('[request-feature] Opened feature request URL');
+  } catch (error) {
+    console.error('[request-feature] Error opening URL:', error);
+  }
+});
+
 saveBtn?.addEventListener('click', async () => {
   const payload = {
     theme: (themeEl?.value || cfg.theme),
